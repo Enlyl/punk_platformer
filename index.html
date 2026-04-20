@@ -1,0 +1,3027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Punk Platformer</title>
+<style>
+  :root {
+    --display-width: 1920px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background:
+      radial-gradient(circle at top, rgba(57, 255, 20, 0.08) 0%, rgba(57, 255, 20, 0) 28%),
+      linear-gradient(180deg, #191220 0%, #0b0912 38%, #050407 100%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px;
+    font-family: 'Courier New', monospace;
+    color: #ffffff;
+  }
+  #app {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+  }
+  #gameWrapper {
+    width: 100%;
+    max-width: min(calc(100vw - 48px), var(--display-width));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    position: relative;
+  }
+  canvas {
+    width: auto;
+    max-width: none;
+    height: auto;
+    border: 4px solid #39ff14;
+    border-radius: 0;
+    box-shadow:
+      0 0 0 4px rgba(255, 204, 0, 0.12),
+      0 24px 80px rgba(57, 255, 20, 0.12);
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #070609;
+  }
+  #bottomPanel {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 0;
+    border: 2px solid rgba(57, 255, 20, 0.3);
+    background:
+      linear-gradient(180deg, rgba(18, 16, 26, 0.95) 0%, rgba(7, 6, 11, 0.95) 100%);
+    box-shadow:
+      inset 0 0 0 2px rgba(255, 255, 255, 0.03),
+      0 12px 32px rgba(0, 0, 0, 0.28);
+  }
+  #controls {
+    flex: 1 1 240px;
+    font-size: 12px;
+    text-align: left;
+    color: #f4f1ff;
+    line-height: 1.5;
+    letter-spacing: 0.08em;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  #controls .control-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 6px;
+    padding: 2px 0 1px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+  }
+  #controls .key {
+    background: rgba(57, 255, 20, 0.12);
+    border: 1px solid rgba(57, 255, 20, 0.55);
+    border-radius: 0;
+    padding: 2px 6px;
+    color: #39ff14;
+    font-weight: 700;
+    font-size: 12px;
+    white-space: nowrap;
+    font-family: 'Courier New', monospace;
+  }
+  #controls .gamepad {
+    color: #87d6ff;
+    font-size: 12px;
+    opacity: 0.9;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+  }
+  #controls .action {
+    color: #ffcc00;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+  }
+  #volumeControl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 1 220px;
+    justify-content: flex-end;
+    color: #39ff14;
+    min-width: 200px;
+  }
+  #volumeControl label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: 'Courier New', monospace;
+  }
+  #volume {
+    width: 160px;
+    accent-color: #39ff14;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="gameWrapper">
+    <canvas id="game" width="1920" height="1080"></canvas>
+    <div id="bottomPanel">
+      <div id="controls">
+        <div class="control-row">
+          <span class="key">← →</span><span class="action">Move</span>
+          <span class="key">SPACE</span><span class="action">Jump</span>
+          <span class="key">E</span><span class="action">Attack</span>
+        </div>
+        <div class="control-row gamepad">
+          <span class="key">L Stick</span><span class="action">Move</span>
+          <span class="key">A</span><span class="action">Jump</span>
+          <span class="key">A</span><span class="action">Select</span>
+          <span class="key">START</span><span class="action">Play / Continue</span>
+        </div>
+      </div>
+      <div id="volumeControl">
+        <label for="volume">Volume</label>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="0.28">
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const GAME_W = 1920;
+const GAME_H = 1080;
+let camX = 0;
+let LEVEL_W = 2500;
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+if (!ctx) {
+  alert('Canvas not supported');
+}
+canvas.width = GAME_W;
+canvas.height = GAME_H;
+
+function applyResolution(w, h) {
+  // Scale canvas via CSS to simulate different resolutions
+  // Internal drawing stays at 1920x1080
+  const scaleX = window.innerWidth / w;
+  const scaleY = window.innerHeight / h;
+  const scale = Math.min(scaleX, scaleY);
+  canvas.style.width = `${w * scale}px`;
+  canvas.style.height = `${h * scale}px`;
+}
+
+// Initialize - start at 1920x1080
+applyResolution(1920, 1080);
+
+const mouseState = {
+  x: 0,
+  y: 0,
+  inside: false,
+};
+let interactiveRegions = [];
+function clearInteractiveRegions() {
+  interactiveRegions = [];
+  canvas.style.cursor = 'default';
+}
+function addInteractiveRegion(x, y, w, h, onClick, onHover) {
+  interactiveRegions.push({ x, y, w, h, onClick, onHover });
+}
+function canvasMousePosition(event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  };
+}
+canvas.addEventListener('mousemove', event => {
+  const pos = canvasMousePosition(event);
+  mouseState.x = pos.x;
+  mouseState.y = pos.y;
+  mouseState.inside = true;
+  let hovering = false;
+  for (const region of interactiveRegions) {
+    if (pos.x >= region.x && pos.x <= region.x + region.w && pos.y >= region.y && pos.y <= region.y + region.h) {
+      hovering = true;
+      canvas.style.cursor = 'pointer';
+      if (region.onHover) region.onHover();
+      break;
+    }
+  }
+  if (!hovering) canvas.style.cursor = 'default';
+});
+canvas.addEventListener('mouseleave', () => {
+  mouseState.inside = false;
+  canvas.style.cursor = 'default';
+});
+canvas.addEventListener('mousedown', event => {
+  const pos = canvasMousePosition(event);
+  for (const region of interactiveRegions) {
+    if (pos.x >= region.x && pos.x <= region.x + region.w && pos.y >= region.y && pos.y <= region.y + region.h) {
+      if (region.onClick) region.onClick(pos);
+      break;
+    }
+  }
+});
+const volumeSlider = document.getElementById('volume');
+const MASTER_VOLUME_MAX = 0.022;
+function currentVolume() {
+  return parseFloat(volumeSlider.value) * MASTER_VOLUME_MAX;
+}
+volumeSlider.addEventListener('input', () => {
+  if (bgGain) bgGain.gain.value = currentVolume();
+});
+
+// ---- Guitar image loader ----
+const guitarImagePaths = {
+  strat: 'guitars/strat.png',
+  mustang: 'guitars/tele.png',
+  jaguar: 'guitars/jaguar.png',
+  lespaul: 'guitars/lespaul.png',
+  superstart: 'guitars/superstrat.png',
+  explorer: 'guitars/explorer.png',
+  vshape: 'guitars/vguitar.png',
+  firebird: 'guitars/firebird.png',
+  iceman: 'guitars/iceman.png'
+};
+const guitarImages = {};
+let guitarImagesReady = false;
+
+function loadGuitarImages() {
+  const names = Object.keys(guitarImagePaths);
+  let loaded = 0;
+  names.forEach(name => {
+    const img = new Image();
+    img.src = guitarImagePaths[name];
+    img.onload = () => {
+      loaded += 1;
+      if (loaded === names.length) guitarImagesReady = true;
+    };
+    img.onerror = () => {
+      console.warn('Could not load guitar image:', guitarImagePaths[name]);
+    };
+    guitarImages[name] = img;
+  });
+}
+
+window.addEventListener('load', loadGuitarImages);
+
+// ---- Audio ----
+const audioCtx = new AudioContext();
+function beep(freq, dur, type='square') {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const level = 0.12 * currentVolume() / MASTER_VOLUME_MAX;
+  gain.gain.setValueAtTime(level, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(level * 0.65, audioCtx.currentTime + dur * 0.45);
+  gain.gain.linearRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + dur);
+}
+function jumpSound() { beep(200, 0.1); beep(300, 0.1); }
+function coinSound() { beep(600, 0.1); beep(900, 0.1); }
+function killSound() { beep(420, 0.08, 'triangle'); beep(480, 0.1, 'triangle'); }
+function winSound() { [400,500,600,800].forEach((f,i) => setTimeout(() => beep(f, 0.15), i*100)); }
+function attackSound() { beep(300, 0.1); beep(500, 0.1); }
+function shopSound() { beep(400, 0.15); beep(600, 0.15); beep(800, 0.15); }
+function buySound() { beep(600, 0.1); beep(900, 0.15); beep(1200, 0.2); }
+function hurtSound() { beep(140, 0.15, 'square'); beep(100, 0.18, 'square'); }
+function playerDeathSound() { beep(160, 0.12, 'sawtooth'); beep(90, 0.3, 'sawtooth'); beep(60, 0.4, 'square'); }
+function gameOverSound() { playerDeathSound(); }
+function guitarKillSound() { beep(520, 0.08, 'triangle'); beep(640, 0.1, 'triangle'); beep(720, 0.08, 'triangle'); }
+
+// ---- Background Music ----
+let bgOsc1, bgOsc2, bgOsc3, bgGain, melodyInterval;
+const melody = [329.63, 493.88, 554.37, 493.88, 440.00, 369.99, 329.63]; // Hedwig's Theme simplified
+let melodyIndex = 0;
+function startBackgroundMusic() {
+  if (bgGain) return; // already playing
+  bgGain = audioCtx.createGain();
+  bgGain.gain.value = currentVolume();
+  bgGain.connect(audioCtx.destination);
+
+  bgOsc1 = audioCtx.createOscillator();
+  bgOsc1.type = 'sawtooth';
+  bgOsc1.frequency.value = melody[0];
+  bgOsc1.connect(bgGain);
+  bgOsc1.start();
+
+  bgOsc2 = audioCtx.createOscillator();
+  bgOsc2.type = 'sawtooth';
+  bgOsc2.frequency.value = 220; // constant harmony
+  bgOsc2.connect(bgGain);
+  bgOsc2.start();
+
+  bgOsc3 = audioCtx.createOscillator();
+  bgOsc3.type = 'sawtooth';
+  bgOsc3.frequency.value = 330; // constant harmony
+  bgOsc3.connect(bgGain);
+  bgOsc3.start();
+
+  // Play melody
+  melodyInterval = setInterval(() => {
+    bgOsc1.frequency.value = melody[melodyIndex];
+    melodyIndex = (melodyIndex + 1) % melody.length;
+  }, 400); // 400ms per note
+}
+function stopBackgroundMusic() {
+  if (bgGain) {
+    clearInterval(melodyInterval);
+    bgOsc1.stop();
+    bgOsc2.stop();
+    bgOsc3.stop();
+    bgGain = null;
+  }
+}
+
+// ---- Input ----
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; e.preventDefault(); });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// Gamepad state tracking
+const gamepadState = {
+  leftStickX: 0, leftStickY: 0,
+  rightStickX: 0, rightStickY: 0,
+  buttons: {},
+  triggers: { left: 0, right: 0 }
+};
+
+// Deadzone for analog sticks
+const GAMEPAD_DEADZONE = 0.25;
+
+function pollGamepad() {
+  const gamepads = navigator.getGamepads?.() || navigator.webkitGetGamepads?.();
+  if (!gamepads || gamepads.length === 0) return;
+
+  const gp = gamepads[0]; // Use first connected gamepad
+  if (!gp) return;
+
+  // Reset gamepad-based keys
+  keys['gpLeft'] = false;
+  keys['gpRight'] = false;
+  keys['gpUp'] = false;
+  keys['gpDown'] = false;
+  keys['gpJump'] = false;
+  keys['gpAttack'] = false;
+  keys['gpStart'] = false;
+
+  // Left Stick (for movement/navigation)
+  gamepadState.leftStickX = gp.axes[0] || 0;
+  gamepadState.leftStickY = gp.axes[1] || 0;
+
+  if (Math.abs(gamepadState.leftStickX) > GAMEPAD_DEADZONE) {
+    if (gamepadState.leftStickX < -GAMEPAD_DEADZONE) keys['gpLeft'] = true;
+    if (gamepadState.leftStickX > GAMEPAD_DEADZONE) keys['gpRight'] = true;
+  }
+  if (Math.abs(gamepadState.leftStickY) > GAMEPAD_DEADZONE) {
+    if (gamepadState.leftStickY < -GAMEPAD_DEADZONE) keys['gpUp'] = true;
+    if (gamepadState.leftStickY > GAMEPAD_DEADZONE) keys['gpDown'] = true;
+  }
+
+  // D-Pad (buttons 12-15)
+  if (gp.buttons[12]?.pressed) keys['gpUp'] = true;
+  if (gp.buttons[13]?.pressed) keys['gpDown'] = true;
+  if (gp.buttons[14]?.pressed) keys['gpLeft'] = true;
+  if (gp.buttons[15]?.pressed) keys['gpRight'] = true;
+
+  // A button (button 0) = Jump/Select
+  if (gp.buttons[0]?.pressed) keys['gpJump'] = true;
+  
+  // X button (button 2) = Attack
+  if (gp.buttons[2]?.pressed) keys['gpAttack'] = true;
+  
+  // Start/Menu (button 9) = Enter/Confirm
+  if (gp.buttons[9]?.pressed) keys['gpStart'] = true;
+
+  // B button (button 1) for alternative actions if needed
+  if (gp.buttons[1]?.pressed) keys['gpB'] = true;
+
+  // LT/RT triggers
+  gamepadState.triggers.left = gp.buttons[4]?.pressed || (gp.axes[4] > 0.5);
+  gamepadState.triggers.right = gp.buttons[5]?.pressed || (gp.axes[5] > 0.5);
+}
+
+// ---- Game State ----
+let gameState = 'start'; // start, settings, playing, win, receipt, shop, gameover
+let score = 0;
+let totalBeer = 0; // persistent across runs
+let lives = 3;
+let receiptTimer = 0;
+let receipItemsList = []; // Items shown in receipt
+const creatorOptions = {
+  names: ['Riot', 'Nova', 'Spike', 'Vex', 'Echo', 'Razor', 'Blitz', 'Nina', 'Sid', 'Lux', 'Crash', 'Zero'],
+  resolutions: [
+    { name: '1920 x 1080', width: 1920, height: 1080 },
+    { name: '2560 x 1440', width: 2560, height: 1440 },
+    { name: '1366 x 768', width: 1366, height: 768 },
+    { name: '1600 x 900', width: 1600, height: 900 },
+    { name: '1280 x 720', width: 1280, height: 720 },
+  ],
+  hairColors: [
+    { name: 'Neon Pink', value: '#ff00ff' },
+    { name: 'Acid Green', value: '#39ff14' },
+    { name: 'Cyber Blue', value: '#36c8ff' },
+    { name: 'Burn Orange', value: '#ff7a18' },
+  ],
+  shirtColors: [
+    { name: 'Lime', value: '#39ff14' },
+    { name: 'Hot Pink', value: '#ff4fd8' },
+    { name: 'Amber', value: '#ffcc00' },
+    { name: 'Ice', value: '#7df9ff' },
+  ],
+  shirtPatterns: [
+    { name: 'Misfits', value: 'misfits' },
+    { name: 'Mohawk Skull', value: 'mohawk-skull' },
+    { name: 'Jester', value: 'jester' },
+    { name: 'ХУЙ', value: 'huy' },
+    { name: 'Punks Not Dead', value: 'punks-not-dead' },
+  ],
+  skinTones: [
+    { name: 'Warm', value: '#f4c29a' },
+    { name: 'Tan', value: '#d8a379' },
+    { name: 'Deep', value: '#8a5b3d' },
+    { name: 'Pale', value: '#f3d8c1' },
+  ],
+  pantsColors: [
+    { name: 'Ink', value: '#2a2a3a' },
+    { name: 'Burgundy', value: '#5a2030' },
+    { name: 'Navy', value: '#20395c' },
+    { name: 'Olive', value: '#3f4a24' },
+  ],
+};
+function makeRandomPresets() {
+  const shuffledNames = [...creatorOptions.names].sort(() => Math.random() - 0.5).slice(0, 5);
+  return shuffledNames.map(name => ({
+    name,
+    hairIndex: Math.floor(Math.random() * creatorOptions.hairColors.length),
+    shirtIndex: Math.floor(Math.random() * creatorOptions.shirtColors.length),
+    patternIndex: Math.floor(Math.random() * creatorOptions.shirtPatterns.length),
+    skinIndex: Math.floor(Math.random() * creatorOptions.skinTones.length),
+    pantsIndex: Math.floor(Math.random() * creatorOptions.pantsColors.length),
+  }));
+}
+const presetPlayers = makeRandomPresets();
+const characterProfile = {
+  presetIndex: 0,
+  resolutionIndex: 0,
+  pendingResolutionIndex: 0,
+  hairIndex: 0,
+  shirtIndex: 0,
+  patternIndex: 0,
+  skinIndex: 0,
+  pantsIndex: 0,
+};
+let creatorSelection = 0;
+let settingsSelection = 0;
+const CREATOR_ITEMS = ['Preset', 'Hair', 'Shirt', 'Pattern', 'Skin', 'Pants', 'Settings', 'Play'];
+const SETTINGS_ITEMS = ['Resolution', 'Apply', 'Back'];
+
+// ---- Guitars ----
+// Shape types: strat, mustang, jaguar, lespaul, superstart, explorer, vshape
+const guitarTypes = [
+  { name: 'Stratocaster', price: 50, damage: 1, color: '#d4a556', shape: 'strat' },
+  { name: 'Telecaster', price: 80, damage: 1, color: '#c9a961', shape: 'mustang' },
+  { name: 'Jaguar', price: 120, damage: 1, color: '#2b8cc4', shape: 'jaguar' },
+  { name: 'Les Paul', price: 200, damage: 2, color: '#cc3a1f', shape: 'lespaul' },
+  { name: 'Superstrat', price: 280, damage: 2, color: '#0066bb', shape: 'superstart' },
+  { name: 'Explorer', price: 350, damage: 2, color: '#f5f5f5', shape: 'explorer' },
+  { name: 'V-Guitar', price: 500, damage: 3, color: '#cc1111', shape: 'vshape' },
+  { name: 'Firebird', price: 450, damage: 2, color: '#ff6f18', shape: 'firebird' },
+  { name: 'Iceman', price: 430, damage: 2, color: '#6fdfff', shape: 'iceman' },
+];
+let ownedGuitars = [];
+
+// ---- Punk Shop Items for Receipt ----
+const punkShopItems = [
+  { name: 'Leather Jacket', basePrice: 15 },
+  { name: 'Spiked Boots', basePrice: 12 },
+  { name: 'Skull Ring', basePrice: 8 },
+  { name: 'Beer Pong Set', basePrice: 20 },
+  { name: 'Vinyl Records', basePrice: 10 },
+  { name: 'Chain Wallet', basePrice: 7 },
+  { name: 'Fishnets', basePrice: 5 },
+  { name: 'Band T-Shirt', basePrice: 9 },
+];
+
+function generateReceiptItems(beerCollected) {
+  const items = [];
+  const numItems = 3 + Math.floor(beerCollected / 10);
+  const usedIndices = new Set();
+  
+  for (let i = 0; i < Math.min(numItems, punkShopItems.length); i++) {
+    let idx;
+    do {
+      idx = Math.floor(Math.random() * punkShopItems.length);
+    } while (usedIndices.has(idx));
+    usedIndices.add(idx);
+    
+    const item = punkShopItems[idx];
+    const quantity = 1 + Math.floor(Math.random() * 3);
+    const price = item.basePrice + Math.floor(Math.random() * 5);
+    items.push({
+      name: item.name,
+      quantity: quantity,
+      unitPrice: price,
+      total: quantity * price
+    });
+  }
+  return items;
+}
+
+// ---- Level ----
+const TILE = 32;
+const platforms = [];
+const beerCans = [];
+const enemies = [];
+
+// Build level
+function buildLevel() {
+  platforms.length = 0;
+  beerCans.length = 0;
+  enemies.length = 0;
+
+  // Ground
+  for (let x = 0; x < LEVEL_W; x += TILE) {
+    platforms.push({ x, y: 448, w: TILE, h: TILE, type: 'ground' });
+  }
+
+  // Floating platforms
+  const layout = [
+    { x: 200, y: 350, w: 5 },
+    { x: 400, y: 280, w: 4 },
+    { x: 600, y: 350, w: 3 },
+    { x: 750, y: 260, w: 4 },
+    { x: 950, y: 320, w: 5 },
+    { x: 1150, y: 250, w: 4 },
+    { x: 1350, y: 350, w: 3 },
+    { x: 1500, y: 280, w: 4 },
+    { x: 1700, y: 220, w: 3 },
+    { x: 1900, y: 300, w: 4 },
+    { x: 2100, y: 350, w: 3 },
+    { x: 2250, y: 280, w: 2 },
+  ];
+  layout.forEach(p => {
+    for (let i = 0; i < p.w; i++) {
+      platforms.push({ x: p.x + i * TILE, y: p.y, w: TILE, h: TILE, type: 'brick' });
+    }
+  });
+
+  // Beer cans - random positions throughout the level
+  for (let x = 180; x < 2400; x += 70 + Math.random() * 60) {
+    beerCans.push({
+      x: x,
+      y: 200 + Math.random() * 220,
+      collected: false
+    });
+  }
+
+  // Enemies
+  const enemyPositions = [
+    { x: 350, y: 416, min: 300, max: 450 },
+    { x: 700, y: 416, min: 600, max: 800 },
+    { x: 800, y: 228, min: 750, max: 880 },
+    { x: 1000, y: 416, min: 950, max: 1100 },
+    { x: 1200, y: 218, min: 1150, max: 1280 },
+    { x: 1550, y: 248, min: 1500, max: 1620 },
+    { x: 1750, y: 188, min: 1700, max: 1820 },
+    { x: 1950, y: 416, min: 1900, max: 2050 },
+  ];
+  enemyPositions.forEach(e => {
+    enemies.push({ x: e.x, y: e.y, vx: 1.5, min: e.min, max: e.max, alive: true });
+  });
+
+  // Goal flag
+  player.goalX = 2400;
+}
+
+// ---- Player ----
+const player = {
+  x: 80, y: 400,
+  w: 28, h: 44,
+  vx: 0, vy: 0,
+  onGround: false,
+  facing: 1,
+  animFrame: 0,
+  animTimer: 0,
+  goalX: 2400,
+  invincible: false,
+  invincibleTimer: 0,
+  hasGuitar: false,
+  guitarType: 0,
+  attacking: false,
+  attackTimer: 0,
+  attackCooldown: 0
+};
+
+function selectedAlias() {
+  return presetPlayers[characterProfile.presetIndex].name;
+}
+function selectedResolution() {
+  return creatorOptions.resolutions[characterProfile.resolutionIndex];
+}
+function pendingResolution() {
+  return creatorOptions.resolutions[characterProfile.pendingResolutionIndex];
+}
+function selectedHairColor() {
+  return creatorOptions.hairColors[characterProfile.hairIndex].value;
+}
+function selectedShirtColor() {
+  return creatorOptions.shirtColors[characterProfile.shirtIndex].value;
+}
+function selectedShirtPattern() {
+  return creatorOptions.shirtPatterns[characterProfile.patternIndex].value;
+}
+function selectedSkinTone() {
+  return creatorOptions.skinTones[characterProfile.skinIndex].value;
+}
+function selectedPantsColor() {
+  return creatorOptions.pantsColors[characterProfile.pantsIndex].value;
+}
+function applyDisplayResolution() {
+  const res = selectedResolution();
+  applyResolution(res.width, res.height);
+  characterProfile.resolutionIndex = characterProfile.pendingResolutionIndex;
+}
+function applyPreset(index) {
+  const preset = presetPlayers[index];
+  characterProfile.presetIndex = index;
+  characterProfile.hairIndex = preset.hairIndex;
+  characterProfile.shirtIndex = preset.shirtIndex;
+  characterProfile.patternIndex = preset.patternIndex;
+  characterProfile.skinIndex = preset.skinIndex;
+  characterProfile.pantsIndex = preset.pantsIndex;
+}
+applyPreset(0);
+characterProfile.pendingResolutionIndex = characterProfile.resolutionIndex;
+applyDisplayResolution();
+
+function updateStartScreen() {
+  const movePrev = (keys['ArrowLeft'] && !keys['ArrowLeft_held']) || (keys['KeyA'] && !keys['KeyA_held']) || (keys['gpLeft'] && !keys['gpLeft_held']);
+  const moveNext = (keys['ArrowRight'] && !keys['ArrowRight_held']) || (keys['KeyD'] && !keys['KeyD_held']) || (keys['gpRight'] && !keys['gpRight_held']);
+  const moveUp = (keys['ArrowUp'] && !keys['ArrowUp_held']) || (keys['KeyW'] && !keys['KeyW_held']) || (keys['gpUp'] && !keys['gpUp_held']);
+  const moveDown = (keys['ArrowDown'] && !keys['ArrowDown_held']) || (keys['KeyS'] && !keys['KeyS_held']) || (keys['gpDown'] && !keys['gpDown_held']);
+  const confirm = (keys['Enter'] && !keys['Enter_held']) || (keys['KeyE'] && !keys['KeyE_held']) || (keys['gpJump'] && !keys['gpJump_held']);
+  const play = (keys['Space'] && !keys['Space_held']) || (keys['gpStart'] && !keys['gpStart_held']);
+
+  if (moveUp) creatorSelection = Math.max(0, creatorSelection - 1);
+  if (moveDown) creatorSelection = Math.min(CREATOR_ITEMS.length - 1, creatorSelection + 1);
+
+  if (movePrev || moveNext || confirm) {
+    const dir = movePrev ? -1 : 1;
+    switch (creatorSelection) {
+      case 0:
+        applyPreset((characterProfile.presetIndex + presetPlayers.length + dir) % presetPlayers.length);
+        break;
+      case 1:
+        characterProfile.hairIndex = (characterProfile.hairIndex + creatorOptions.hairColors.length + dir) % creatorOptions.hairColors.length;
+        break;
+      case 2:
+        characterProfile.shirtIndex = (characterProfile.shirtIndex + creatorOptions.shirtColors.length + dir) % creatorOptions.shirtColors.length;
+        break;
+      case 3:
+        characterProfile.patternIndex = (characterProfile.patternIndex + creatorOptions.shirtPatterns.length + dir) % creatorOptions.shirtPatterns.length;
+        break;
+      case 4:
+        characterProfile.skinIndex = (characterProfile.skinIndex + creatorOptions.skinTones.length + dir) % creatorOptions.skinTones.length;
+        break;
+      case 5:
+        characterProfile.pantsIndex = (characterProfile.pantsIndex + creatorOptions.pantsColors.length + dir) % creatorOptions.pantsColors.length;
+        break;
+      case 6:
+        if (confirm) gameState = 'settings';
+        break;
+      case 7:
+        if (confirm || play) startGame();
+        break;
+    }
+  }
+
+  if (play && creatorSelection === 7) startGame();
+
+  keys['ArrowLeft_held'] = keys['ArrowLeft'];
+  keys['ArrowRight_held'] = keys['ArrowRight'];
+  keys['ArrowUp_held'] = keys['ArrowUp'];
+  keys['ArrowDown_held'] = keys['ArrowDown'];
+  keys['KeyA_held'] = keys['KeyA'];
+  keys['KeyD_held'] = keys['KeyD'];
+  keys['KeyW_held'] = keys['KeyW'];
+  keys['KeyS_held'] = keys['KeyS'];
+  keys['Enter_held'] = keys['Enter'];
+  keys['KeyE_held'] = keys['KeyE'];
+  keys['Space_held'] = keys['Space'];
+  keys['gpLeft_held'] = keys['gpLeft'];
+  keys['gpRight_held'] = keys['gpRight'];
+  keys['gpUp_held'] = keys['gpUp'];
+  keys['gpDown_held'] = keys['gpDown'];
+  keys['gpJump_held'] = keys['gpJump'];
+  keys['gpStart_held'] = keys['gpStart'];
+}
+
+function updateSettingsScreen() {
+  const movePrev = (keys['ArrowLeft'] && !keys['ArrowLeft_held']) || (keys['KeyA'] && !keys['KeyA_held']) || (keys['gpLeft'] && !keys['gpLeft_held']);
+  const moveNext = (keys['ArrowRight'] && !keys['ArrowRight_held']) || (keys['KeyD'] && !keys['KeyD_held']) || (keys['gpRight'] && !keys['gpRight_held']);
+  const moveUp = (keys['ArrowUp'] && !keys['ArrowUp_held']) || (keys['KeyW'] && !keys['KeyW_held']) || (keys['gpUp'] && !keys['gpUp_held']);
+  const moveDown = (keys['ArrowDown'] && !keys['ArrowDown_held']) || (keys['KeyS'] && !keys['KeyS_held']) || (keys['gpDown'] && !keys['gpDown_held']);
+  const confirm = (keys['Enter'] && !keys['Enter_held']) || (keys['KeyE'] && !keys['KeyE_held']) || (keys['gpJump'] && !keys['gpJump_held']);
+  const back = (keys['Escape'] && !keys['Escape_held']) || (keys['Space'] && !keys['Space_held']) || (keys['gpStart'] && !keys['gpStart_held']) || keys['gpB'];
+
+  if (moveUp) settingsSelection = Math.max(0, settingsSelection - 1);
+  if (moveDown) settingsSelection = Math.min(SETTINGS_ITEMS.length - 1, settingsSelection + 1);
+
+  if (settingsSelection === 0 && (movePrev || moveNext)) {
+    const dir = movePrev ? -1 : 1;
+    characterProfile.pendingResolutionIndex = (characterProfile.pendingResolutionIndex + creatorOptions.resolutions.length + dir) % creatorOptions.resolutions.length;
+  }
+
+  if (settingsSelection === 1 && confirm) {
+    characterProfile.resolutionIndex = characterProfile.pendingResolutionIndex;
+    applyDisplayResolution();
+  }
+
+  if ((settingsSelection === 2 && confirm) || back) {
+    characterProfile.pendingResolutionIndex = characterProfile.resolutionIndex;
+    gameState = 'start';
+  }
+
+  keys['ArrowLeft_held'] = keys['ArrowLeft'];
+  keys['ArrowRight_held'] = keys['ArrowRight'];
+  keys['ArrowUp_held'] = keys['ArrowUp'];
+  keys['ArrowDown_held'] = keys['ArrowDown'];
+  keys['KeyA_held'] = keys['KeyA'];
+  keys['KeyD_held'] = keys['KeyD'];
+  keys['KeyW_held'] = keys['KeyW'];
+  keys['KeyS_held'] = keys['KeyS'];
+  keys['Enter_held'] = keys['Enter'];
+  keys['KeyE_held'] = keys['KeyE'];
+  keys['Space_held'] = keys['Space'];
+  keys['Escape_held'] = keys['Escape'];
+  keys['gpLeft_held'] = keys['gpLeft'];
+  keys['gpRight_held'] = keys['gpRight'];
+  keys['gpUp_held'] = keys['gpUp'];
+  keys['gpDown_held'] = keys['gpDown'];
+  keys['gpJump_held'] = keys['gpJump'];
+  keys['gpStart_held'] = keys['gpStart'];
+}
+
+function resetPlayer() {
+  player.x = 80;
+  player.y = 400;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = false;
+  player.invincible = false;
+  player.invincibleTimer = 0;
+  player.attacking = false;
+  player.attackTimer = 0;
+  player.attackCooldown = 0;
+}
+
+// ---- Camera ----
+function updateCamera() {
+  const target = player.x - 300;
+  camX += (target - camX) * 0.1;
+  camX = Math.max(0, Math.min(camX, LEVEL_W - GAME_W));
+}
+
+// ---- Physics ----
+const GRAVITY = 0.5;
+const JUMP_FORCE = -12;
+const SPEED = 2.5;
+const MAX_FALL = 10;
+
+function rects(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// ---- Update ----
+function update() {
+  if (gameState === 'start') {
+    updateStartScreen();
+    return;
+  }
+  if (gameState === 'settings') {
+    updateSettingsScreen();
+    return;
+  }
+  if (gameState !== 'playing') return;
+
+  // Invincibility timer
+  if (player.invincible) {
+    player.invincibleTimer--;
+    if (player.invincibleTimer <= 0) player.invincible = false;
+  }
+
+  // Attack cooldown
+  if (player.attackCooldown > 0) player.attackCooldown--;
+
+  // Attack input (keyboard or gamepad)
+  if ((keys['KeyE'] || keys['KeyJ'] || keys['gpAttack']) && !player.attacking && player.attackCooldown === 0 && player.hasGuitar) {
+    player.attacking = true;
+    player.attackTimer = 15;
+    player.attackCooldown = 30;
+    attackSound();
+  }
+
+  // Attack animation
+  if (player.attacking) {
+    player.attackTimer--;
+    if (player.attackTimer <= 0) player.attacking = false;
+  }
+
+  // Input (keyboard or gamepad)
+  if (keys['ArrowLeft'] || keys['KeyA'] || keys['gpLeft']) { player.vx = -SPEED; player.facing = -1; }
+  else if (keys['ArrowRight'] || keys['KeyD'] || keys['gpRight']) { player.vx = SPEED; player.facing = 1; }
+  else player.vx *= 0.8;
+
+  if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW'] || keys['gpJump'] || keys['gpUp']) && player.onGround) {
+    player.vy = JUMP_FORCE;
+    player.onGround = false;
+    jumpSound();
+  }
+
+  // Physics
+  player.vy += GRAVITY;
+  if (player.vy > MAX_FALL) player.vy = MAX_FALL;
+
+  player.x += player.vx;
+  if (player.x < 0) player.x = 0;
+  if (player.x > LEVEL_W - player.w) player.x = LEVEL_W - player.w;
+
+  player.y += player.vy;
+  player.onGround = false;
+
+  // Platform collisions
+  for (const p of platforms) {
+    if (rects(player, p)) {
+      const prevBottom = player.y + player.h - player.vy;
+      if (prevBottom <= p.y && player.vy >= 0) {
+        player.y = p.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+      } else if (player.vy < 0 && player.y >= p.y + p.h - 10) {
+        player.y = p.y + p.h;
+        player.vy = 0;
+      }
+    }
+  }
+
+  // Fall death
+  if (player.y > 520) {
+    lives--;
+    if (lives <= 0) { gameState = 'gameover'; playerDeathSound(); }
+    else resetPlayer();
+  }
+
+  // Beer collection
+  for (const c of beerCans) {
+    if (!c.collected && rects(player, { x: c.x - 12, y: c.y - 12, w: 24, h: 24 })) {
+      c.collected = true;
+      score += 10;
+      coinSound();
+    }
+  }
+
+  // Enemy update & collision
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    e.x += e.vx;
+    if (e.x <= e.min || e.x >= e.max) e.vx *= -1;
+
+    // Guitar attack
+    if (player.attacking && player.attackTimer > 3) {
+      const attackProgress = (15 - player.attackTimer) / 15;
+      const gx = player.x + (player.facing > 0 ? 78 : -54);
+      const gy = player.y - 22 + attackProgress * 42;
+      if (e.x > gx - 20 && e.x < gx + 24 && e.y > gy - 10 && e.y < gy + 56) {
+        e.alive = false;
+        score += 50;
+        guitarKillSound();
+        continue;
+      }
+    }
+
+    if (rects(player, { x: e.x - 14, y: e.y - 28, w: 28, h: 28 })) {
+      const prevBottom = player.y + player.h - player.vy;
+      if (prevBottom < e.y && player.vy > 0) {
+        e.alive = false;
+        player.vy = -8;
+        score += 50;
+        killSound();
+      } else if (!player.invincible) {
+        lives--;
+        if (lives <= 0) { gameState = 'gameover'; gameOverSound(); }
+        else {
+          player.invincible = true;
+          player.invincibleTimer = 120;
+        }
+        hurtSound();
+      }
+    }
+  }
+
+  // Win
+  if (player.x + player.w > player.goalX) {
+    totalBeer += score;
+    winSound();
+    gameState = 'shop';
+    shopCol = 0;
+    shopRow = 0;
+  }
+
+  // Animation
+  if (Math.abs(player.vx) > 0.5) {
+    player.animTimer++;
+    if (player.animTimer > 8) { player.animTimer = 0; player.animFrame = (player.animFrame + 1) % 4; }
+  } else {
+    player.animFrame = 0;
+    player.animTimer++;
+  }
+
+  updateCamera();
+}
+
+// Handle scene transitions (keyboard + gamepad)
+function handleGameStateTransitions() {
+  if (!keys['Space_transition_held'] && !keys['Enter_transition_held']) {
+    if (keys['Space']) keys['Space_transition_held'] = true;
+    if (keys['Enter'] || keys['gpStart'] || keys['gpJump']) keys['Enter_transition_held'] = true;
+  }
+
+  if (keys['Space_transition_held'] || keys['Enter_transition_held']) {
+    if (gameState === 'gameover') {
+      audioCtx.resume();
+      startGame();
+    }
+    keys['Space_transition_held'] = false;
+    keys['Enter_transition_held'] = false;
+  }
+
+  if (!keys['Space'] && !keys['Enter'] && !keys['gpStart'] && !keys['gpJump']) {
+    keys['Space_transition_held'] = false;
+    keys['Enter_transition_held'] = false;
+  }
+}
+
+// ---- Draw ----
+// Draw a pixel-art guitar shape - faces right by default
+function drawGuitarShape(x, y, facing, guitarIdx, isAttacking, attackTimerVal) {
+  const g = guitarTypes[guitarIdx];
+  ctx.save();
+  ctx.translate(x, y);
+  if (facing < 0) ctx.scale(-1, 1);
+
+  // Glow for expensive guitars
+  if (guitarIdx >= 4) {
+    ctx.shadowColor = g.color;
+    ctx.shadowBlur = 10;
+  }
+
+  // Attack swing rotation
+  if (isAttacking) {
+    const rotation = -118 + (15 - attackTimerVal) / 15 * 132;
+    ctx.translate(40, 12);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.translate(-40, -12);
+  }
+
+  const c = g.color;
+  const dark = '#1a1a1a';
+  const metal = '#c0c0c0';
+  const str = '#efefef';
+  const pickb = '#1a1a1a';
+  const wood = '#3a2a1a';
+  const fretboard = '#2a2020';
+
+  if (guitarImagesReady && guitarImages[g.shape] && guitarImages[g.shape].complete) {
+    const img = guitarImages[g.shape];
+    ctx.drawImage(img, -26, -16, 52, 38);
+    ctx.restore();
+    return;
+  }
+
+  switch (g.shape) {
+    case 'strat':
+      // Stratocaster: classic Fender with sunburst finish
+      // Main body - sunburst gradient effect (dark edges, lighter center)
+      // Outer darker edge
+      ctx.fillStyle = '#4a1a0a';
+      ctx.beginPath();
+      ctx.moveTo(8, 13);
+      ctx.bezierCurveTo(6, 16, 6, 18, 7, 22);
+      ctx.bezierCurveTo(8, 26, 14, 28, 18, 28);
+      ctx.bezierCurveTo(22, 28, 24, 27, 25, 26);
+      ctx.lineTo(27, 20);
+      ctx.bezierCurveTo(28, 16, 26, 12, 22, 10);
+      ctx.bezierCurveTo(18, 8, 12, 8, 8, 13);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Mid-tone body
+      ctx.fillStyle = '#8b4513';
+      ctx.beginPath();
+      ctx.moveTo(10, 14);
+      ctx.bezierCurveTo(8, 17, 8, 19, 9, 23);
+      ctx.bezierCurveTo(10, 26, 15, 27, 18, 27);
+      ctx.bezierCurveTo(21, 27, 23, 26, 24, 25);
+      ctx.lineTo(26, 19);
+      ctx.bezierCurveTo(27, 15, 25, 11, 21, 9);
+      ctx.bezierCurveTo(17, 8, 12, 8, 10, 14);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Lighter center sunburst
+      ctx.fillStyle = '#d4a574';
+      ctx.beginPath();
+      ctx.moveTo(12, 15);
+      ctx.bezierCurveTo(10, 18, 10, 20, 11, 24);
+      ctx.bezierCurveTo(12, 25, 16, 26, 18, 26);
+      ctx.bezierCurveTo(20, 26, 22, 25, 23, 24);
+      ctx.lineTo(25, 18);
+      ctx.bezierCurveTo(26, 14, 24, 10, 20, 9);
+      ctx.bezierCurveTo(16, 8, 13, 9, 12, 15);
+      ctx.closePath();
+      ctx.fill();
+      
+      // White pickguard
+      ctx.fillStyle = '#f5f5f0';
+      ctx.beginPath();
+      ctx.moveTo(12, 17);
+      ctx.lineTo(24, 15);
+      ctx.lineTo(24, 24);
+      ctx.lineTo(14, 25);
+      ctx.lineTo(12, 22);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Pickguard edge shadow
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+      
+      // Neck (maple/lighter wood)
+      ctx.fillStyle = '#d2b48c';
+      ctx.fillRect(28, 12, 19, 4);
+      
+      // Fretboard (darker)
+      ctx.fillStyle = '#2a2020';
+      ctx.fillRect(28, 12, 19, 2);
+      
+      // Frets (metal)
+      ctx.strokeStyle = '#c0c0c0';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28 + i * 3.2, 12);
+        ctx.lineTo(28 + i * 3.2, 14);
+        ctx.stroke();
+      }
+      
+      // Headstock (classic Fender shape)
+      ctx.fillStyle = '#d2b48c';
+      ctx.beginPath();
+      ctx.moveTo(48, 9);
+      ctx.lineTo(57, 7);
+      ctx.lineTo(59, 8);
+      ctx.lineTo(59, 14);
+      ctx.lineTo(57, 15);
+      ctx.lineTo(48, 16);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Headstock logo area
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillRect(50, 10, 6, 2);
+      
+      // Tuning pegs (6 in 3x2 configuration)
+      ctx.fillStyle = '#a0a0a0';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(51, 10 + i * 2.5, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(58, 10 + i * 2.5, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Body pickups (3 single coils - white)
+      ctx.fillStyle = '#f5f5f0';
+      ctx.fillRect(21, 13, 3.5, 2.5);
+      ctx.fillRect(21, 18, 3.5, 2.5);
+      ctx.fillRect(21, 23, 3.5, 2.5);
+      
+      // Pickup poles (black/dark)
+      ctx.fillStyle = '#1a1a1a';
+      for (let j = 0; j < 3; j++) {
+        for (let i = 0; i < 6; i++) {
+          ctx.fillRect(21.8 + i * 0.5, 13.5 + j * 5, 0.3, 1.5);
+        }
+      }
+      
+      // Tremolo bridge (vibrato system)
+      ctx.fillStyle = '#c0c0c0';
+      ctx.fillRect(15, 26, 12, 1.5);
+      ctx.fillStyle = '#888888';
+      ctx.fillRect(16, 26.5, 10, 0.5);
+      
+      // Bridge saddles
+      ctx.fillStyle = '#a0a0a0';
+      for (let i = 0; i < 6; i++) {
+        ctx.fillRect(16.5 + i * 1.5, 25.5, 0.8, 1.5);
+      }
+      
+      // Control knobs (volume, tone)
+      ctx.fillStyle = '#333333';
+      ctx.beginPath();
+      ctx.arc(9, 19, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(9, 24, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Strings
+      ctx.strokeStyle = '#e8e8e8';
+      ctx.lineWidth = 0.7;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28, 12.8 + i * 0.9);
+        ctx.lineTo(58, 12.8 + i * 0.9);
+        ctx.stroke();
+      }
+      
+      // Body outline (subtle)
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(8, 13);
+      ctx.bezierCurveTo(6, 16, 6, 18, 7, 22);
+      ctx.bezierCurveTo(8, 26, 14, 28, 18, 28);
+      ctx.bezierCurveTo(22, 28, 24, 27, 25, 26);
+      ctx.lineTo(27, 20);
+      ctx.bezierCurveTo(28, 16, 26, 12, 22, 10);
+      ctx.bezierCurveTo(18, 8, 12, 8, 8, 13);
+      ctx.closePath();
+      ctx.stroke();
+      break;
+
+    case 'mustang':
+      // Telecaster: squared single-cutaway, clean design
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(10, 13);
+      ctx.lineTo(23, 11);
+      ctx.lineTo(26, 17);
+      ctx.lineTo(26, 25);
+      ctx.lineTo(20, 27);
+      ctx.lineTo(10, 27);
+      ctx.lineTo(6, 19);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = dark;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Neck
+      ctx.fillStyle = wood;
+      ctx.fillRect(28, 12, 19, 4);
+      // Fretboard
+      ctx.fillStyle = fretboard;
+      ctx.fillRect(28, 13, 19, 2);
+      // Headstock (Fender single-col)
+      ctx.fillStyle = wood;
+      ctx.fillRect(48, 9, 10, 8);
+      // Tuning pegs (3x2)
+      ctx.fillStyle = metal;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(50, 11 + i * 2, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(56, 11 + i * 2, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Body pickups (2 single coils)
+      ctx.fillStyle = pickb;
+      ctx.fillRect(22, 14, 4, 2);
+      ctx.fillRect(22, 22, 4, 2);
+      // Bridge plate
+      ctx.fillStyle = metal;
+      ctx.fillRect(14, 27, 12, 1);
+      // Strings
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28, 13 + i * 1.5);
+        ctx.lineTo(58, 13 + i * 1.5);
+        ctx.stroke();
+      }
+      break;
+
+    case 'jaguar':
+      // Jaguar: offset single-cutaway with unique curves
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(12, 13);
+      ctx.lineTo(24, 11);
+      ctx.lineTo(27, 17);
+      ctx.lineTo(27, 25);
+      ctx.lineTo(20, 27);
+      ctx.lineTo(10, 27);
+      ctx.lineTo(4, 21);
+      ctx.lineTo(6, 15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = dark;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Neck
+      ctx.fillStyle = wood;
+      ctx.fillRect(28, 12, 19, 4);
+      // Fretboard
+      ctx.fillStyle = fretboard;
+      ctx.fillRect(28, 12.5, 19, 2.5);
+      // Headstock
+      ctx.fillStyle = wood;
+      ctx.fillRect(48, 8, 12, 9);
+      // Chrome pickguard area
+      ctx.fillStyle = '#e8e0d0';
+      ctx.fillRect(8, 16, 10, 10);
+      // Tuning pegs
+      ctx.fillStyle = metal;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(51, 11 + i * 2.5, 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(59, 11 + i * 2.5, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Body pickups (2 jazzmaster style)
+      ctx.fillStyle = pickb;
+      ctx.fillRect(20, 14, 4, 2.5);
+      ctx.fillRect(20, 22, 4, 2.5);
+      // Bridge
+      ctx.fillStyle = metal;
+      ctx.fillRect(16, 26, 10, 1.5);
+      // Strings
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28, 13 + i * 1.5);
+        ctx.lineTo(58, 13 + i * 1.5);
+        ctx.stroke();
+      }
+      break;
+
+    case 'lespaul':
+      // Les Paul: thick single cutaway with arched top
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(8, 13);
+      ctx.lineTo(24, 11);
+      ctx.lineTo(27, 18);
+      ctx.lineTo(27, 26);
+      ctx.lineTo(20, 28);
+      ctx.lineTo(8, 28);
+      ctx.lineTo(6, 20);
+      ctx.closePath();
+      ctx.fill();
+      // Arched top (lighter shade)
+      ctx.fillStyle = '#d4a574';
+      ctx.fillRect(9, 14, 14, 10);
+      // Top edge highlight
+      ctx.strokeStyle = '#e8c888';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(9, 14, 14, 10);
+      // Neck (thick)
+      ctx.fillStyle = wood;
+      ctx.fillRect(28, 11, 19, 5);
+      // Fretboard
+      ctx.fillStyle = fretboard;
+      ctx.fillRect(28, 11.5, 19, 3.5);
+      // Headstock (big 6-in-line)
+      ctx.fillStyle = wood;
+      ctx.fillRect(48, 8, 12, 9);
+      ctx.fillStyle = '#b8944a';
+      ctx.fillRect(49, 8.5, 10, 8);
+      // Tuning pegs (3x2)
+      ctx.fillStyle = metal;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(51, 11 + i * 2, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(59, 11 + i * 2, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Body humbuckers
+      ctx.fillStyle = pickb;
+      ctx.fillRect(18, 15, 5, 2.5);
+      ctx.fillRect(18, 23, 5, 2.5);
+      ctx.fillStyle = metal;
+      ctx.fillRect(18.5, 15.5, 4, 1.5);
+      ctx.fillRect(18.5, 23.5, 4, 1.5);
+      // Bridge
+      ctx.fillStyle = metal;
+      ctx.fillRect(14, 27, 10, 1.5);
+      // Control knobs
+      ctx.fillStyle = dark;
+      ctx.beginPath();
+      ctx.arc(11, 20, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(11, 25, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Strings
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28, 13 + i * 1.2);
+        ctx.lineTo(58, 13 + i * 1.2);
+        ctx.stroke();
+      }
+      break;
+
+    case 'superstart':
+      // Superstrat: aggressive pointed, sharp design
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(10, 11);
+      ctx.lineTo(24, 9);
+      ctx.lineTo(28, 16);
+      ctx.lineTo(28, 25);
+      ctx.lineTo(20, 28);
+      ctx.lineTo(6, 26);
+      ctx.lineTo(4, 15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = dark;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Neck
+      ctx.fillStyle = wood;
+      ctx.fillRect(28, 11, 19, 4);
+      // Fretboard
+      ctx.fillStyle = fretboard;
+      ctx.fillRect(28, 11.5, 19, 2.5);
+      // Headstock (angular)
+      ctx.fillStyle = wood;
+      ctx.beginPath();
+      ctx.moveTo(48, 8);
+      ctx.lineTo(60, 6);
+      ctx.lineTo(60, 14);
+      ctx.lineTo(48, 16);
+      ctx.closePath();
+      ctx.fill();
+      // Tuning pegs
+      ctx.fillStyle = metal;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(51, 10 + i * 2.5, 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(57, 10 + i * 2.5, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Body humbuckers (2)
+      ctx.fillStyle = pickb;
+      ctx.fillRect(22, 13, 4, 2.5);
+      ctx.fillRect(22, 21, 4, 2.5);
+      ctx.fillStyle = metal;
+      ctx.fillRect(22.5, 13.5, 3, 1.5);
+      ctx.fillRect(22.5, 21.5, 3, 1.5);
+      // Floyd Rose bridge
+      ctx.fillStyle = metal;
+      ctx.fillRect(16, 26, 12, 2);
+      // Strings
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28, 12.5 + i * 1.5);
+        ctx.lineTo(58, 12.5 + i * 1.5);
+        ctx.stroke();
+      }
+      break;
+
+    case 'explorer':
+      // Explorer: geometric angular shape with horns
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(16, 10);
+      ctx.lineTo(24, 12);
+      ctx.lineTo(26, 18);
+      ctx.lineTo(28, 20);
+      ctx.lineTo(26, 26);
+      ctx.lineTo(14, 28);
+      ctx.lineTo(10, 26);
+      ctx.lineTo(6, 20);
+      ctx.lineTo(8, 16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = dark;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Neck
+      ctx.fillStyle = wood;
+      ctx.fillRect(28, 11, 19, 4);
+      // Fretboard
+      ctx.fillStyle = fretboard;
+      ctx.fillRect(28, 12, 19, 2);
+      // Headstock (Explorer style - angled)
+      ctx.fillStyle = wood;
+      ctx.beginPath();
+      ctx.moveTo(48, 8);
+      ctx.lineTo(60, 5);
+      ctx.lineTo(60, 15);
+      ctx.lineTo(48, 16);
+      ctx.closePath();
+      ctx.fill();
+      // Tuning pegs
+      ctx.fillStyle = metal;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(51, 9 + i * 2.5, 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(57, 9 + i * 2.5, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Body humbuckers
+      ctx.fillStyle = pickb;
+      ctx.fillRect(18, 14, 5, 2.5);
+      ctx.fillRect(18, 22, 5, 2.5);
+      // Bridge
+      ctx.fillStyle = metal;
+      ctx.fillRect(16, 26, 10, 1.5);
+      // Strings
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28, 12.5 + i * 1.5);
+        ctx.lineTo(58, 12.5 + i * 1.5);
+        ctx.stroke();
+      }
+      break;
+
+    case 'vshape':
+      // Flying V / V-Guitar: sharp V-shaped body
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(26, 10);
+      ctx.lineTo(30, 14);
+      ctx.lineTo(32, 24);
+      ctx.lineTo(26, 26);
+      ctx.lineTo(20, 24);
+      ctx.lineTo(18, 14);
+      ctx.closePath();
+      ctx.fill();
+      // Lower V wings
+      ctx.fillRect(8, 18, 10, 4);
+      ctx.fillRect(32, 18, 10, 4);
+      ctx.strokeStyle = dark;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Neck
+      ctx.fillStyle = wood;
+      ctx.fillRect(28, 11, 19, 4);
+      // Fretboard
+      ctx.fillStyle = fretboard;
+      ctx.fillRect(28, 12, 19, 2);
+      // Headstock
+      ctx.fillStyle = wood;
+      ctx.beginPath();
+      ctx.moveTo(48, 9);
+      ctx.lineTo(60, 6);
+      ctx.lineTo(60, 14);
+      ctx.lineTo(48, 15);
+      ctx.closePath();
+      ctx.fill();
+      // Tuning pegs
+      ctx.fillStyle = metal;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(51, 9.5 + i * 2, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(57, 9.5 + i * 2, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Body humbucker (center)
+      ctx.fillStyle = pickb;
+      ctx.fillRect(25, 15, 4, 3);
+      ctx.fillStyle = metal;
+      ctx.fillRect(25.5, 15.5, 3, 2);
+      // Bridge
+      ctx.fillStyle = metal;
+      ctx.fillRect(24, 25, 6, 1.5);
+      // Strings
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(28, 12 + i * 1.5);
+        ctx.lineTo(58, 12 + i * 1.5);
+        ctx.stroke();
+      }
+      break;
+
+    case 'firebird':
+      // Firebird fallback shape
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(10, 12);
+      ctx.lineTo(24, 9);
+      ctx.lineTo(30, 14);
+      ctx.lineTo(30, 26);
+      ctx.lineTo(24, 28);
+      ctx.lineTo(10, 24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#d2b48c';
+      ctx.fillRect(28, 12, 19, 4);
+      ctx.fillStyle = '#2a2020';
+      ctx.fillRect(28, 13, 19, 2);
+      ctx.fillStyle = metal;
+      ctx.fillRect(16, 26, 10, 1.5);
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(28, 13);
+      ctx.lineTo(58, 13);
+      ctx.stroke();
+      break;
+
+    case 'iceman':
+      // Iceman fallback shape
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(12, 10);
+      ctx.lineTo(26, 9);
+      ctx.lineTo(30, 16);
+      ctx.lineTo(27, 26);
+      ctx.lineTo(20, 28);
+      ctx.lineTo(10, 24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#d2b48c';
+      ctx.fillRect(28, 12, 19, 4);
+      ctx.fillStyle = '#2a2020';
+      ctx.fillRect(28, 13, 19, 2);
+      ctx.fillStyle = metal;
+      ctx.fillRect(16, 26, 10, 1.5);
+      ctx.strokeStyle = str;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(28, 13);
+      ctx.lineTo(58, 13);
+      ctx.stroke();
+      break;
+  }
+
+  ctx.restore();
+}
+
+// Draw guitar on player's back
+function drawGuitarOnBack(x, y, facing, guitarIdx) {
+  const g = guitarTypes[guitarIdx];
+  ctx.save();
+  ctx.translate(x + 14, y);
+  if (facing < 0) ctx.scale(-1, 1);
+
+  ctx.fillStyle = g.color;
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 4;
+  
+  // Simplified back view matched to guitar type
+  switch (g.shape) {
+    case 'strat':
+      // Strat on back
+      ctx.beginPath();
+      ctx.moveTo(22, 16);
+      ctx.lineTo(32, 14);
+      ctx.lineTo(34, 22);
+      ctx.lineTo(34, 28);
+      ctx.lineTo(26, 30);
+      ctx.lineTo(20, 26);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'mustang':
+      // Telecaster on back
+      ctx.fillRect(22, 16, 12, 14);
+      break;
+    case 'jaguar':
+      // Jaguar on back
+      ctx.beginPath();
+      ctx.moveTo(24, 14);
+      ctx.lineTo(34, 12);
+      ctx.lineTo(36, 20);
+      ctx.lineTo(36, 28);
+      ctx.lineTo(26, 30);
+      ctx.lineTo(20, 26);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'lespaul':
+      // Les Paul on back (thick)
+      ctx.fillRect(20, 14, 16, 16);
+      break;
+    case 'superstart':
+      // Superstrat on back
+      ctx.beginPath();
+      ctx.moveTo(22, 12);
+      ctx.lineTo(34, 10);
+      ctx.lineTo(36, 20);
+      ctx.lineTo(36, 28);
+      ctx.lineTo(24, 30);
+      ctx.lineTo(18, 24);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'explorer':
+      // Explorer on back
+      ctx.beginPath();
+      ctx.moveTo(26, 12);
+      ctx.lineTo(36, 14);
+      ctx.lineTo(36, 26);
+      ctx.lineTo(26, 30);
+      ctx.lineTo(16, 26);
+      ctx.lineTo(16, 14);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'vshape':
+      // V-Guitar on back (compact)
+      ctx.beginPath();
+      ctx.moveTo(28, 12);
+      ctx.lineTo(32, 16);
+      ctx.lineTo(34, 26);
+      ctx.lineTo(28, 28);
+      ctx.lineTo(22, 26);
+      ctx.lineTo(24, 16);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'firebird':
+      ctx.beginPath();
+      ctx.moveTo(22, 14);
+      ctx.lineTo(32, 12);
+      ctx.lineTo(36, 20);
+      ctx.lineTo(36, 28);
+      ctx.lineTo(24, 30);
+      ctx.lineTo(18, 24);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'iceman':
+      ctx.beginPath();
+      ctx.moveTo(20, 12);
+      ctx.lineTo(34, 11);
+      ctx.lineTo(37, 20);
+      ctx.lineTo(33, 28);
+      ctx.lineTo(22, 30);
+      ctx.lineTo(16, 22);
+      ctx.closePath();
+      ctx.fill();
+      break;
+  }
+  
+  // Neck visible from back
+  ctx.fillRect(32, 12, 14, 3);
+  // Headstock silhouette
+  ctx.fillRect(46, 10, 6, 4);
+
+  ctx.restore();
+}
+
+function drawPixelPunk(x, y, facing, frame, showGuitar) {
+  ctx.save();
+  ctx.translate(x + 14, y);
+  if (facing < 0) ctx.scale(-1, 1);
+  ctx.translate(-14, 0);
+
+  const walkCycle = frame % 4;
+  const isMoving = Math.abs(player.vx) > 0.5 && player.onGround;
+  const legOffset = isMoving ? (walkCycle < 2 ? 3 : -1) : 0;
+  const armSwing = isMoving ? (walkCycle < 2 ? 2 : -2) : 0;
+  const bodyBob = isMoving ? (walkCycle % 2 === 0 ? 0 : 1) : 0;
+  const hairOffset = isMoving ? (walkCycle % 2 === 0 ? 0 : 1) : Math.sin(frame * 0.8) * 1;
+
+  // Attack swing with proper guitar shape
+  if (player.attacking) {
+    ctx.save();
+    ctx.translate(35, 22 + bodyBob);
+    ctx.rotate(Math.PI);
+    drawGuitarShape(0, 0, 1, player.guitarType, true, player.attackTimer);
+    ctx.restore();
+  }
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(2, 42, 24, 4);
+
+  // Legs
+  ctx.fillStyle = selectedPantsColor();
+  ctx.fillRect(4, 32 - legOffset, 8, 14 + legOffset);
+  ctx.fillRect(16, 32 + legOffset, 8, 14 - legOffset);
+
+  // White outline for pants
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(3, 31 - legOffset, 10, 15 + legOffset);
+  ctx.strokeRect(15, 31 + legOffset, 10, 15 - legOffset);
+
+  // Boots
+  ctx.fillStyle = '#333';
+  ctx.fillRect(2, 42, 10, 4);
+  ctx.fillRect(16, 42, 10, 4);
+
+  // Body (jacket)
+  ctx.fillStyle = '#111';
+  ctx.fillRect(4, 14 + bodyBob, 20, 20);
+
+  // Jacket stripes
+  ctx.fillStyle = selectedShirtColor();
+  ctx.fillRect(4, 18 + bodyBob, 20, 3);
+  ctx.fillRect(4, 26 + bodyBob, 20, 3);
+
+  // Shirt pattern / logo
+  ctx.fillStyle = '#f0f0f0';
+  switch (selectedShirtPattern()) {
+    case 'misfits':
+      ctx.fillRect(11, 20 + bodyBob, 6, 2);
+      ctx.fillRect(10, 22 + bodyBob, 8, 2);
+      ctx.fillRect(11, 24 + bodyBob, 2, 3);
+      ctx.fillRect(15, 24 + bodyBob, 2, 3);
+      ctx.fillRect(13, 25 + bodyBob, 2, 1);
+      break;
+    case 'mohawk-skull':
+      ctx.fillRect(12, 20 + bodyBob, 4, 4);
+      ctx.fillRect(11, 24 + bodyBob, 6, 2);
+      ctx.fillRect(12, 19 + bodyBob, 1, 2);
+      ctx.fillRect(14, 18 + bodyBob, 1, 3);
+      ctx.fillStyle = '#111';
+      ctx.fillRect(13, 21 + bodyBob, 1, 1);
+      ctx.fillRect(15, 21 + bodyBob, 1, 1);
+      break;
+    case 'jester':
+      ctx.fillStyle = '#ffcc00';
+      ctx.fillRect(11, 20 + bodyBob, 2, 5);
+      ctx.fillRect(15, 20 + bodyBob, 2, 5);
+      ctx.fillStyle = '#ff4fd8';
+      ctx.fillRect(13, 23 + bodyBob, 2, 4);
+      break;
+    case 'huy':
+      ctx.fillStyle = '#f0f0f0';
+      ctx.font = 'bold 4px monospace';
+      ctx.fillText('X*Y', 10, 25 + bodyBob);
+      break;
+    case 'punks-not-dead':
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(10, 20 + bodyBob, 8, 1);
+      ctx.fillRect(10, 22 + bodyBob, 8, 1);
+      ctx.fillRect(10, 24 + bodyBob, 8, 1);
+      break;
+  }
+
+  // Arms
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 16 + armSwing, 5, 14);
+  ctx.fillRect(23, 16 - armSwing, 5, 14);
+
+  // Hands
+  ctx.fillStyle = selectedSkinTone();
+  ctx.fillRect(0, 28 + armSwing, 5, 5);
+  ctx.fillRect(23, 28 - armSwing, 5, 5);
+
+  // Head
+  ctx.fillStyle = selectedSkinTone();
+  ctx.fillRect(6, 2 + bodyBob, 16, 14);
+
+  // Hair (mohawk)
+  ctx.fillStyle = selectedHairColor();
+  ctx.fillRect(8, -6 + hairOffset + bodyBob, 12, 10);
+  // Spikes
+  for (let i = 0; i < 5; i++) {
+    ctx.fillRect(7 + i * 3, -10 + hairOffset + bodyBob, 2, 5);
+  }
+
+  // Eyes
+  ctx.fillStyle = '#000';
+  ctx.fillRect(8, 6 + bodyBob, 4, 4);
+  ctx.fillRect(16, 6 + bodyBob, 4, 4);
+  // Eye shine
+  ctx.fillStyle = '#39ff14';
+  ctx.fillRect(9, 6 + bodyBob, 2, 2);
+  ctx.fillRect(17, 6 + bodyBob, 2, 2);
+
+  // Mouth
+  ctx.fillStyle = '#000';
+  ctx.fillRect(10, 12 + bodyBob, 8, 2);
+
+  // Guitar in hands once equipped
+  if (showGuitar && !player.attacking) {
+    ctx.save();
+    ctx.translate(15, 27 + bodyBob);
+    ctx.rotate(Math.PI);
+    ctx.scale(0.8, 0.8);
+    drawGuitarShape(0, 0, 1, player.guitarType, false, 0);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function drawPlatform(p) {
+  const sx = p.x - camX;
+  if (sx + p.w < 0 || sx > GAME_W) return;
+
+  if (p.type === 'ground') {
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(sx, p.y, p.w, p.h);
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(sx, p.y, p.w, 8);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(sx, p.y + p.h - 4, p.w, 4);
+  } else {
+    ctx.fillStyle = '#4a3a2a';
+    ctx.fillRect(sx, p.y, p.w, p.h);
+    ctx.fillStyle = '#6a5a4a';
+    ctx.fillRect(sx + 2, p.y + 2, p.w - 4, p.h - 4);
+    ctx.fillStyle = '#3a2a1a';
+    ctx.fillRect(sx, p.y, p.w, 4);
+  }
+}
+
+function drawCoin(c) {
+  if (c.collected) return;
+  const sx = c.x - camX;
+  if (sx < -20 || sx > 820) return;
+
+  // Beer can - white body with red bands and center label
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(sx - 5, c.y - 16, 10, 14);
+
+  ctx.fillStyle = '#d92b2b';
+  ctx.fillRect(sx - 5, c.y - 16, 10, 2);
+  ctx.fillRect(sx - 5, c.y - 4, 10, 2);
+  ctx.fillRect(sx - 4, c.y - 11, 8, 4);
+
+  ctx.fillStyle = '#d0d0d0';
+  ctx.fillRect(sx - 5, c.y - 18, 10, 2);
+
+  ctx.fillStyle = '#b0b0b0';
+  ctx.beginPath();
+  ctx.ellipse(sx, c.y - 16, 5, 1.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.fillRect(sx - 3.5, c.y - 13, 2, 8);
+
+  ctx.fillStyle = '#ffff99';
+  ctx.beginPath();
+  ctx.arc(sx + 4, c.y - 10, 1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawEnemy(e) {
+  if (!e.alive) return;
+  const sx = e.x - camX;
+  if (sx < -30 || sx > 830) return;
+
+  ctx.fillStyle = '#ff3333';
+  ctx.fillRect(sx - 12, e.y - 28, 24, 24);
+  ctx.fillStyle = '#aa0000';
+  ctx.fillRect(sx - 14, e.y - 30, 28, 28);
+
+  // Eyes
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(sx - 8, e.y - 22, 6, 6);
+  ctx.fillRect(sx + 2, e.y - 22, 6, 6);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(sx - 6, e.y - 20, 3, 3);
+  ctx.fillRect(sx + 4, e.y - 20, 3, 3);
+
+  // Antenna
+  ctx.fillStyle = '#ff3333';
+  ctx.fillRect(sx - 1, e.y - 38, 2, 10);
+  ctx.fillStyle = '#ffff00';
+  ctx.fillRect(sx - 3, e.y - 40, 6, 6);
+}
+
+function drawFlag() {
+  const sx = player.goalX - camX;
+  ctx.fillStyle = '#666';
+  ctx.fillRect(sx, 360, 6, 88);
+  ctx.fillStyle = '#39ff14';
+  ctx.fillRect(sx + 6, 360, 30, 20);
+  ctx.fillStyle = '#ff00ff';
+  ctx.fillRect(sx + 12, 364, 20, 12);
+}
+
+function drawBackground() {
+  // Dark night sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, GAME_H);
+  grad.addColorStop(0, '#0a0812');
+  grad.addColorStop(0.4, '#12101a');
+  grad.addColorStop(1, '#1a1520');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Subtle stars
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  for (let i = 0; i < 40; i++) {
+    const sx = (i * 173 + camX * 0.05) % GAME_W;
+    const sy = (i * 89) % 280;
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+
+  // Buildings
+  const buildingColors = ['#12101a', '#15181f', '#0f1218', '#181622'];
+  const warmLights = ['#ff9944', '#ffbb66', '#eeaa55', '#dd8833'];
+
+  for (let i = 0; i < 20; i++) {
+    const bx = (i * 120 - camX * 0.3) % 900 - 50;
+    const bh = 80 + (i * 37) % 120;
+    ctx.fillStyle = buildingColors[i % buildingColors.length];
+    ctx.fillRect(bx, GAME_H - bh, 80, bh);
+    ctx.fillStyle = '#1a1a25';
+    ctx.fillRect(bx + 4, GAME_H - bh + 4, 72, bh - 4);
+
+    ctx.fillStyle = warmLights[i % warmLights.length];
+    ctx.globalAlpha = 0.3;
+    for (let wy = GAME_H - bh + 12; wy < GAME_H - 15; wy += 22) {
+      for (let wx = bx + 8; wx < bx + 72; wx += 18) {
+        if ((i + wy) % 3 !== 0) ctx.fillRect(wx, wy, 6, 10);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // A couple of brighter windows make the skyline feel more alive.
+    const brightWindow1X = bx + 8 + ((i * 7) % 4) * 18;
+    const brightWindow1Y = GAME_H - bh + 12 + ((i * 5) % 3) * 22;
+    const brightWindow2X = bx + 8 + ((i * 11 + 2) % 4) * 18;
+    const brightWindow2Y = GAME_H - bh + 12 + ((i * 3 + 1) % 3) * 22;
+
+    ctx.fillStyle = '#ffd98a';
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(brightWindow1X, brightWindow1Y, 6, 10);
+    if (i % 2 === 0) ctx.fillRect(brightWindow2X, brightWindow2Y, 6, 10);
+
+    ctx.fillStyle = '#fff1b8';
+    ctx.globalAlpha = 0.28;
+    ctx.fillRect(brightWindow1X - 1, brightWindow1Y - 1, 8, 12);
+    if (i % 2 === 0) ctx.fillRect(brightWindow2X - 1, brightWindow2Y - 1, 8, 12);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---- UI Colors & Styles ----
+const UI = {
+  bg: '#0a0812',
+  bgLight: '#12101a',
+  primary: '#39ff14',
+  secondary: '#ff4fd8',
+  accent: '#ffcc00',
+  text: '#ffffff',
+  textDim: '#d9d1f8',
+  danger: '#ff3333',
+  success: '#00ff88',
+  panelBg: 'rgba(10, 8, 18, 0.9)',
+  border: 'rgba(57, 255, 20, 0.45)',
+};
+
+// Draw panel with border (uses fillRect for compatibility)
+function drawPanel(x, y, w, h, borderColor, fillColor = UI.panelBg) {
+  ctx.fillStyle = fillColor;
+  ctx.fillRect(x, y, w, h);
+  if (borderColor) {
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+}
+
+function drawGuitarPreview(shape, x, y, w, h) {
+  const img = guitarImages[shape];
+  if (img && img.complete && img.naturalWidth > 0) {
+    const maxW = w - 16;
+    const maxH = h - 16;
+    const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
+    const dw = img.naturalWidth * scale;
+    const dh = img.naturalHeight * scale;
+    const dx = x + (w - dw) / 2;
+    const dy = y + (h - dh) / 2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+    return true;
+  }
+  return false;
+}
+
+function drawRoundedRect(x, y, w, h, r, fillColor, strokeColor) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fillColor) {
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+  }
+  if (strokeColor) {
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+function drawHUD() {
+  ctx.fillStyle = 'rgba(6, 6, 10, 0.84)';
+  ctx.fillRect(0, 0, GAME_W, 56);
+  ctx.strokeStyle = UI.border;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, GAME_W, 56);
+
+  drawPanel(10, 8, 150, 40, UI.border, 'rgba(16, 20, 12, 0.92)');
+  drawPanel(170, 8, 250, 40, player.hasGuitar ? UI.secondary : 'rgba(255, 255, 255, 0.08)', 'rgba(20, 16, 28, 0.92)');
+  drawPanel(616, 8, 174, 40, UI.border, 'rgba(24, 12, 16, 0.92)');
+
+  ctx.textBaseline = 'top';
+
+  ctx.fillStyle = UI.textDim;
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('SCORE', 20, 14);
+  ctx.fillStyle = UI.primary;
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText(score.toString().padStart(5, '0'), 20, 28);
+
+  ctx.fillStyle = UI.textDim;
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('BEER', 96, 14);
+  ctx.fillStyle = UI.accent;
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText(totalBeer.toString().padStart(4, '0'), 96, 28);
+
+  ctx.fillStyle = player.hasGuitar ? UI.secondary : UI.textDim;
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText(player.hasGuitar ? 'GEAR' : 'NO GUITAR', 180, 14);
+  ctx.font = 'bold 16px monospace';
+  if (player.hasGuitar) {
+    const g = guitarTypes[player.guitarType];
+    ctx.fillStyle = g.color;
+    ctx.fillText(g.name.toUpperCase(), 180, 28);
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('E / X ATTACK', 322, 30);
+  } else {
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('VISIT SHOP FOR A GUITAR', 180, 30);
+  }
+
+  ctx.fillStyle = UI.textDim;
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('LIVES', 626, 14);
+  for (let i = 0; i < 3; i++) {
+    const hx = 660 + i * 32;
+    const active = i < lives;
+    ctx.fillStyle = active ? UI.danger : '#392028';
+    ctx.fillRect(hx, 27, 8, 8);
+    ctx.fillRect(hx + 10, 27, 8, 8);
+    ctx.fillRect(hx + 3, 35, 10, 8);
+    ctx.fillRect(hx + 6, 43, 4, 2);
+    if (active) {
+      ctx.fillStyle = '#ff9da0';
+      ctx.fillRect(hx + 2, 29, 2, 2);
+      ctx.fillRect(hx + 12, 29, 2, 2);
+    }
+  }
+
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ---- Shop ----
+let shopCol = 0; // Column (0-2)
+let shopRow = 0; // Row (0-2)
+const SHOP_COLS = 3;
+const SHOP_ROWS = 3;
+let shopConfirming = false;
+let shopConfirmSelection = 0; // 0 - да, 1 - нет
+let shopConfirmReleaseRequired = false;
+let shopConfirmMode = 'buy';
+let shopGpUpHeld = false;
+let shopGpDownHeld = false;
+let shopGpLeftHeld = false;
+let shopGpRightHeld = false;
+
+function guitarIndexFromShop(col, row) {
+  const idx = row * SHOP_COLS + col;
+  return idx < guitarTypes.length ? idx : -1;
+}
+
+function shopSelection() {
+  return guitarIndexFromShop(shopCol, shopRow);
+}
+
+function drawShopItem(i, x, y) {
+  const g = guitarTypes[i];
+  const owned = ownedGuitars.includes(i);
+  const selected = shopSelection() === i;
+  const canAfford = totalBeer >= g.price;
+  const cardW = 220, cardH = 42;
+  const cardFill = selected ? 'rgba(57, 255, 20, 0.18)' : 'rgba(10, 8, 18, 0.88)';
+  const borderColor = selected ? UI.primary : 'rgba(255, 255, 255, 0.08)';
+
+  drawPanel(x, y, cardW, cardH, borderColor, cardFill);
+  if (selected) {
+    ctx.fillStyle = 'rgba(57, 255, 20, 0.08)';
+    ctx.fillRect(x + 1, y + 1, cardW - 2, cardH - 2);
+    ctx.fillStyle = UI.primary;
+    ctx.fillRect(x + 0, y + 0, 4, cardH);
+  }
+
+  // Guitar color indicator
+  ctx.fillStyle = owned ? '#333' : g.color;
+  ctx.fillRect(x + 12, y + 9, 7, 24);
+
+  // Name
+  ctx.fillStyle = owned ? UI.textDim : (selected ? UI.primary : UI.text);
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(g.name.toUpperCase(), x + 28, y + 15);
+
+  // Price / owned
+  ctx.fillStyle = owned ? UI.success : (canAfford ? UI.accent : UI.danger);
+  ctx.font = owned ? 'bold 11px monospace' : 'bold 11px monospace';
+  ctx.fillText(owned ? 'OWNED' : g.price + ' BEER', x + 28, y + 29);
+
+  // Damage stat
+  ctx.fillStyle = UI.textDim;
+  ctx.font = 'bold 11px monospace';
+  const dmgText = 'DMG ' + g.damage;
+  ctx.fillText(dmgText, x + cardW - 14 - ctx.measureText(dmgText).width, y + 22);
+
+  addInteractiveRegion(x, y, cardW, cardH, () => {
+    shopCol = i % SHOP_COLS;
+    shopRow = Math.floor(i / SHOP_COLS);
+    if (shopSelection() === i) {
+      if (ownedGuitars.includes(i)) {
+        shopConfirming = true;
+        shopConfirmSelection = 0;
+        shopConfirmReleaseRequired = false;
+        shopConfirmMode = 'equip';
+      } else if (totalBeer >= g.price) {
+        shopConfirming = true;
+        shopConfirmSelection = 0;
+        shopConfirmReleaseRequired = false;
+        shopConfirmMode = 'buy';
+      }
+    }
+  }, () => {
+    shopCol = i % SHOP_COLS;
+    shopRow = Math.floor(i / SHOP_COLS);
+  });
+}
+
+function drawShop() {
+  ctx.fillStyle = UI.bg;
+  ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Header panel
+  ctx.fillStyle = UI.panelBg;
+  ctx.fillRect(0, 0, GAME_W, 80);
+  ctx.strokeStyle = UI.border;
+  ctx.beginPath();
+  ctx.moveTo(0, 80); ctx.lineTo(GAME_W, 80);
+  ctx.stroke();
+
+  // Title
+  ctx.fillStyle = UI.primary;
+  ctx.font = 'bold 28px Arial';
+  const shopTitle = 'GUITAR SHOP';
+  const shopTitleWidth = ctx.measureText(shopTitle).width;
+  ctx.fillText(shopTitle, 400 - shopTitleWidth / 2, 35);
+
+  // Beer balance
+  ctx.fillStyle = UI.accent;
+  ctx.font = 'bold 20px Arial';
+  const beerText = 'BEER ' + totalBeer;
+  const beerTextWidth = ctx.measureText(beerText).width;
+  ctx.fillText(beerText, 760 - beerTextWidth, 35);
+
+  // Preview section
+  ctx.fillStyle = UI.textDim;
+  ctx.font = '12px monospace';
+  const previewLabel = 'PREVIEW';
+  const previewLabelWidth = ctx.measureText(previewLabel).width;
+  ctx.fillText(previewLabel, 400 - previewLabelWidth / 2, 100);
+
+  // Guitar preview box
+  const previewX = 275;
+  const previewY = 108;
+  const previewW = 250;
+  const previewH = 120;
+  drawPanel(previewX, previewY, previewW, previewH, UI.border);
+
+  const previewShape = guitarTypes[shopSelection()].shape;
+  if (!drawGuitarPreview(previewShape, previewX, previewY, previewW, previewH)) {
+    ctx.save();
+    ctx.translate(previewX + previewW / 2, previewY + previewH / 2);
+    const scale = 3.2;
+    ctx.scale(scale, scale);
+    drawGuitarShape(-14, -10, 1, shopSelection(), false, 0);
+    ctx.restore();
+  }
+
+  // Guitar name under preview
+  const prevGuitar = guitarTypes[shopSelection()];
+  ctx.fillStyle = prevGuitar.color;
+  ctx.font = 'bold 16px monospace';
+  const previewName = prevGuitar.name.toUpperCase();
+  ctx.fillText(previewName, 400 - ctx.measureText(previewName).width / 2, 245);
+  ctx.fillStyle = UI.textDim;
+  ctx.font = 'bold 13px monospace';
+  const previewDmg = 'DMG ' + prevGuitar.damage;
+  ctx.fillText(previewDmg, 400 - ctx.measureText(previewDmg).width / 2, 265);
+
+  // Guitar list
+  ctx.fillStyle = UI.textDim;
+  ctx.font = 'bold 14px Arial';
+  const listTitle = 'AVAILABLE GUITARS';
+  const listTitleWidth = ctx.measureText(listTitle).width;
+  ctx.fillText(listTitle, 400 - listTitleWidth / 2, 290);
+
+  const cols = 3;
+  const xStart = 50;
+  const xGap = 250;
+  const rowY = 302;
+  const rowGap = 44;
+  for (let i = 0; i < guitarTypes.length; i++) {
+    const column = i % cols;
+    const row = Math.floor(i / cols);
+    const x = xStart + column * xGap;
+    const y = rowY + row * rowGap;
+    drawShopItem(i, x, y);
+  }
+
+  // Confirmation dialog
+  if (shopConfirming) {
+    const dialogW = 320;
+    const dialogH = 108;
+    const dialogX = 400 - dialogW / 2;
+    const dialogY = 194;
+    drawPanel(dialogX, dialogY, dialogW, dialogH, UI.primary, UI.panelBg);
+
+    ctx.fillStyle = UI.text;
+    ctx.font = 'bold 16px monospace';
+    const confirmText = shopConfirmMode === 'equip' ? 'TAKE THIS GUITAR?' : 'BUY THIS GUITAR?';
+    const confirmWidth = ctx.measureText(confirmText).width;
+    ctx.fillText(confirmText, 400 - confirmWidth / 2, dialogY + 28);
+
+    const g = guitarTypes[shopSelection()];
+    ctx.fillStyle = g.color;
+    ctx.font = 'bold 13px monospace';
+    const guitarName = shopConfirmMode === 'equip' ? g.name.toUpperCase() + ' - FREE' : g.name.toUpperCase() + ' - ' + g.price + ' BEER';
+    const nameWidth = ctx.measureText(guitarName).width;
+    ctx.fillText(guitarName, 400 - nameWidth / 2, dialogY + 48);
+
+    // Yes/No buttons
+    const buttonY = dialogY + 72;
+    const buttonW = 64;
+    const buttonH = 22;
+    const buttonGap = 18;
+    const totalButtonsWidth = buttonW * 2 + buttonGap;
+    const yesX = 400 - totalButtonsWidth / 2;
+    const noX = yesX + buttonW + buttonGap;
+
+    // Yes button
+    const yesFill = shopConfirmSelection === 0 ? UI.primary : UI.panelBg;
+    const yesBorder = shopConfirmSelection === 0 ? UI.primary : UI.border;
+    drawPanel(yesX, buttonY, buttonW, buttonH, yesBorder, yesFill);
+    ctx.fillStyle = shopConfirmSelection === 0 ? UI.bg : UI.text;
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('YES', yesX + buttonW / 2 - ctx.measureText('YES').width / 2, buttonY + 15);
+    addInteractiveRegion(yesX, buttonY, buttonW, buttonH, () => {
+      shopConfirmSelection = 0;
+      const idx = shopSelection();
+      const g = guitarTypes[idx];
+      if (shopConfirmMode === 'equip' && ownedGuitars.includes(idx)) {
+        player.hasGuitar = true;
+        player.guitarType = idx;
+      } else if (!ownedGuitars.includes(idx) && totalBeer >= g.price) {
+        totalBeer -= g.price;
+        ownedGuitars.push(idx);
+        player.hasGuitar = true;
+        player.guitarType = idx;
+        buySound();
+      }
+      shopConfirming = false;
+      shopConfirmReleaseRequired = false;
+    }, () => {
+      shopConfirmSelection = 0;
+    });
+
+    // No button
+    const noFill = shopConfirmSelection === 1 ? UI.primary : UI.panelBg;
+    const noBorder = shopConfirmSelection === 1 ? UI.primary : UI.border;
+    drawPanel(noX, buttonY, buttonW, buttonH, noBorder, noFill);
+    ctx.fillStyle = shopConfirmSelection === 1 ? UI.bg : UI.text;
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('NO', noX + buttonW / 2 - ctx.measureText('NO').width / 2, buttonY + 15);
+    addInteractiveRegion(noX, buttonY, buttonW, buttonH, () => {
+      shopConfirmSelection = 1;
+      shopConfirming = false;
+      shopConfirmReleaseRequired = false;
+    }, () => {
+      shopConfirmSelection = 1;
+    });
+  }
+
+  // Footer instructions
+  ctx.fillStyle = UI.panelBg;
+  ctx.fillRect(0, GAME_H - 40, GAME_W, 40);
+  ctx.strokeStyle = UI.border;
+  ctx.beginPath();
+  ctx.moveTo(0, GAME_H - 40); ctx.lineTo(GAME_W, GAME_H - 40);
+  ctx.stroke();
+
+  ctx.fillStyle = UI.textDim;
+  ctx.font = '14px Arial';
+  const footerText = 'KEYBOARD: E / ENTER SELECT, SPACE PLAY   |   GAMEPAD: A SELECT, START PLAY';
+  const footerWidth = ctx.measureText(footerText).width;
+  ctx.fillText(footerText, 400 - footerWidth / 2, 465);
+
+  // Owned guitars reminder
+  if (ownedGuitars.length > 0) {
+    ctx.fillStyle = UI.textDim;
+    ctx.font = '12px Arial';
+    const ownedNames = ownedGuitars.map(i => guitarTypes[i].name).join(', ');
+    const ownedText = 'Owned: ' + ownedNames;
+    const ownedWidth = ctx.measureText(ownedText).width;
+    ctx.fillText(ownedText, 400 - ownedWidth / 2, 432);
+  }
+}
+
+function updateShop() {
+  if (!shopConfirming) {
+    // 2D Navigation - move around the grid freely (keyboard or gamepad)
+    if ((keys['ArrowUp'] && !keys['ArrowUp_held']) || (keys['gpUp'] && !shopGpUpHeld)) {
+      shopRow = Math.max(0, shopRow - 1);
+      if (keys['ArrowUp']) keys['ArrowUp_held'] = true;
+      if (keys['gpUp']) shopGpUpHeld = true;
+    }
+    if (!keys['ArrowUp']) keys['ArrowUp_held'] = false;
+    if (!keys['gpUp']) shopGpUpHeld = false;
+
+    if ((keys['ArrowDown'] && !keys['ArrowDown_held']) || (keys['gpDown'] && !shopGpDownHeld)) {
+      shopRow = Math.min(SHOP_ROWS - 1, shopRow + 1);
+      if (keys['ArrowDown']) keys['ArrowDown_held'] = true;
+      if (keys['gpDown']) shopGpDownHeld = true;
+    }
+    if (!keys['ArrowDown']) keys['ArrowDown_held'] = false;
+    if (!keys['gpDown']) shopGpDownHeld = false;
+
+    if ((keys['ArrowLeft'] && !keys['ArrowLeft_held']) || (keys['gpLeft'] && !shopGpLeftHeld)) {
+      shopCol = Math.max(0, shopCol - 1);
+      if (keys['ArrowLeft']) keys['ArrowLeft_held'] = true;
+      if (keys['gpLeft']) shopGpLeftHeld = true;
+    }
+    if (!keys['ArrowLeft']) keys['ArrowLeft_held'] = false;
+    if (!keys['gpLeft']) shopGpLeftHeld = false;
+
+    if ((keys['ArrowRight'] && !keys['ArrowRight_held']) || (keys['gpRight'] && !shopGpRightHeld)) {
+      shopCol = Math.min(SHOP_COLS - 1, shopCol + 1);
+      if (keys['ArrowRight']) keys['ArrowRight_held'] = true;
+      if (keys['gpRight']) shopGpRightHeld = true;
+    }
+    if (!keys['ArrowRight']) keys['ArrowRight_held'] = false;
+    if (!keys['gpRight']) shopGpRightHeld = false;
+
+    // Validate selection (skip empty cells)
+    const idx = shopSelection();
+    if (idx < 0 || idx >= guitarTypes.length) {
+      shopCol = 0;
+      shopRow = 0;
+    }
+
+    // Try to buy guitar (keyboard or gamepad)
+    if ((keys['Enter'] && !keys['Enter_held']) || (keys['KeyE'] && !keys['KeyE_held']) || (keys['gpJump'] && !keys['gpJump_held'])) {
+      const buyIdx = shopSelection();
+      if (buyIdx >= 0 && buyIdx < guitarTypes.length) {
+        const g = guitarTypes[buyIdx];
+        if (!ownedGuitars.includes(buyIdx) && totalBeer >= g.price) {
+          shopConfirming = true;
+          shopConfirmSelection = 0; // Default to yes
+          shopConfirmReleaseRequired = true;
+          shopConfirmMode = 'buy';
+        } else if (ownedGuitars.includes(buyIdx)) {
+          shopConfirming = true;
+          shopConfirmSelection = 0;
+          shopConfirmReleaseRequired = true;
+          shopConfirmMode = 'equip';
+        }
+      }
+      if (keys['Enter']) keys['Enter_held'] = true;
+      if (keys['KeyE']) keys['KeyE_held'] = true;
+      if (keys['gpJump']) keys['gpJump_held'] = true;
+    }
+    if (!keys['Enter']) keys['Enter_held'] = false;
+    if (!keys['KeyE']) keys['KeyE_held'] = false;
+    if (!keys['gpJump']) keys['gpJump_held'] = false;
+
+    if (!shopConfirming && ((keys['Space'] && !keys['Space_held']) || (keys['gpStart'] && !keys['gpStart_held']))) {
+      audioCtx.resume();
+      startGame();
+      if (keys['Space']) keys['Space_held'] = true;
+      if (keys['gpStart']) keys['gpStart_held'] = true;
+    }
+    if (!keys['Space']) keys['Space_held'] = false;
+    if (!keys['gpStart']) keys['gpStart_held'] = false;
+  } else {
+    if (!keys['Enter'] && !keys['KeyE'] && !keys['gpJump']) {
+      shopConfirmReleaseRequired = false;
+    }
+
+    // Confirmation dialog navigation
+    if ((keys['ArrowLeft'] && !keys['ArrowLeft_held']) || (keys['gpLeft'] && !shopGpLeftHeld)) {
+      shopConfirmSelection = Math.max(0, shopConfirmSelection - 1);
+      if (keys['ArrowLeft']) keys['ArrowLeft_held'] = true;
+      if (keys['gpLeft']) shopGpLeftHeld = true;
+    }
+    if (!keys['ArrowLeft']) keys['ArrowLeft_held'] = false;
+    if (!keys['gpLeft']) shopGpLeftHeld = false;
+
+    if ((keys['ArrowRight'] && !keys['ArrowRight_held']) || (keys['gpRight'] && !shopGpRightHeld)) {
+      shopConfirmSelection = Math.min(1, shopConfirmSelection + 1);
+      if (keys['ArrowRight']) keys['ArrowRight_held'] = true;
+      if (keys['gpRight']) shopGpRightHeld = true;
+    }
+    if (!keys['ArrowRight']) keys['ArrowRight_held'] = false;
+    if (!keys['gpRight']) shopGpRightHeld = false;
+
+    // Confirm or cancel
+    if (!shopConfirmReleaseRequired && ((keys['Enter'] && !keys['Enter_held']) || (keys['KeyE'] && !keys['KeyE_held']) || (keys['gpJump'] && !keys['gpJump_held']))) {
+      if (shopConfirmSelection === 0) { // Yes
+        const idx = shopSelection();
+        const g = guitarTypes[idx];
+        if (shopConfirmMode === 'equip' && ownedGuitars.includes(idx)) {
+          player.hasGuitar = true;
+          player.guitarType = idx;
+        } else if (!ownedGuitars.includes(idx) && totalBeer >= g.price) {
+          totalBeer -= g.price;
+          ownedGuitars.push(idx);
+          player.hasGuitar = true;
+          player.guitarType = idx;
+          buySound();
+        }
+      }
+      shopConfirming = false;
+      shopConfirmReleaseRequired = false;
+      if (keys['Enter']) keys['Enter_held'] = true;
+      if (keys['KeyE']) keys['KeyE_held'] = true;
+      if (keys['gpJump']) keys['gpJump_held'] = true;
+    }
+    if (!keys['Enter']) keys['Enter_held'] = false;
+    if (!keys['KeyE']) keys['KeyE_held'] = false;
+    if (!keys['gpJump']) keys['gpJump_held'] = false;
+
+    // Cancel with Escape or B
+    if ((keys['Escape'] && !keys['Escape_held']) || keys['gpB']) {
+      shopConfirming = false;
+      shopConfirmReleaseRequired = false;
+      if (keys['Escape']) keys['Escape_held'] = true;
+    }
+    if (!keys['Escape']) keys['Escape_held'] = false;
+  }
+}
+
+// ---- Receipt ----
+function updateReceipt() {
+  receiptTimer++;
+  
+  // Handle key press for skipping (one-shot to avoid immediate transition to game start)
+  if (!keys['Space_skip_held'] && !keys['Enter_skip_held']) {
+    if (keys['Space'] || keys['Enter'] || keys['gpStart'] || keys['gpJump']) {
+      keys['Space_skip_held'] = true;
+    }
+  }
+  
+  // Auto-advance to shop after 4 seconds (240 frames at 60fps) or on key press
+  if (receiptTimer > 240 || keys['Space_skip_held']) {
+    shopSound();
+    gameState = 'shop';
+    shopCol = 0;
+    shopRow = 0;
+    receiptTimer = 0;
+    keys['Space_skip_held'] = false;
+  }
+}
+
+function drawReceipt() {
+  ctx.fillStyle = UI.bg;
+  ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Paper texture background
+  ctx.fillStyle = 'rgba(240, 235, 220, 0.95)';
+  ctx.fillRect(120, 30, GAME_W - 240, GAME_H - 60);
+  
+  // Border
+  ctx.strokeStyle = '#8b6914';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(120, 30, 560, 420);
+
+  // Receipt title
+  ctx.fillStyle = '#8b6914';
+  ctx.font = 'bold 20px monospace';
+  const receiptTitle = '~~~ PUNK SHOP RECEIPT ~~~';
+  const receiptTitleWidth = ctx.measureText(receiptTitle).width;
+  ctx.fillText(receiptTitle, 400 - receiptTitleWidth / 2, 60);
+
+  // Transaction ID & date
+  ctx.font = '12px monospace';
+  ctx.fillStyle = '#333';
+  const txnId = 'TXN: #' + Math.floor(Math.random() * 100000).toString().padStart(5, '0');
+  const txnIdWidth = ctx.measureText(txnId).width;
+  ctx.fillText(txnId, 400 - txnIdWidth / 2, 80);
+  
+  const dateStr = new Date().toLocaleDateString();
+  const dateWidth = ctx.measureText(dateStr).width;
+  ctx.fillText(dateStr, 400 - dateWidth / 2, 95);
+
+  // Separator
+  ctx.fillStyle = '#8b6914';
+  ctx.fillRect(135, 105, 530, 1);
+
+  // Items header
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('ITEM', 140, 130);
+  ctx.fillText('QTY', 380, 130);
+  ctx.fillText('PRICE', 450, 130);
+  ctx.fillText('TOTAL', 530, 130);
+
+  // Items list
+  ctx.font = '12px monospace';
+  let yPos = 155;
+  let grandTotal = 0;
+  const maxItems = 6;
+  
+  for (let i = 0; i < Math.min(receipItemsList.length, maxItems); i++) {
+    const item = receipItemsList[i];
+    const itemTotal = item.total;
+    grandTotal += itemTotal;
+
+    // Item name (truncated if too long)
+    const name = item.name.length > 20 ? item.name.substring(0, 17) + '...' : item.name;
+    ctx.fillStyle = '#333';
+    ctx.fillText(name, 140, yPos);
+    
+    // Quantity
+    ctx.fillText('x' + item.quantity, 385, yPos);
+    
+    // Unit price
+    ctx.fillText(item.unitPrice + '¢', 455, yPos);
+    
+    // Total
+    ctx.fillStyle = '#8b6914';
+    ctx.fillText(itemTotal + '¢', 530, yPos);
+    
+    yPos += 22;
+  }
+
+  // Separator
+  ctx.fillStyle = '#8b6914';
+  ctx.fillRect(135, yPos, 530, 1);
+  yPos += 12;
+
+  // Subtotal
+  ctx.fillStyle = '#333';
+  ctx.font = '13px monospace';
+  ctx.fillText('Subtotal:', 380, yPos);
+  ctx.fillStyle = '#8b6914';
+  ctx.fillText(grandTotal + '¢', 520, yPos);
+  yPos += 22;
+
+  // Tax (10%)
+  const tax = Math.floor(grandTotal * 0.1);
+  ctx.fillStyle = '#333';
+  ctx.fillText('Tax (10%):', 380, yPos);
+  ctx.fillStyle = '#8b6914';
+  ctx.fillText(tax + '¢', 520, yPos);
+  yPos += 22;
+
+  // Total separator
+  ctx.fillStyle = '#8b6914';
+  ctx.fillRect(135, yPos - 8, 530, 2);
+
+  // Grand Total
+  yPos += 8;
+  ctx.fillStyle = '#8b6914';
+  ctx.font = 'bold 16px monospace';
+  const finalTotal = grandTotal + tax;
+  ctx.fillText('TOTAL: ' + finalTotal + '¢', 450, yPos);
+
+  // Footer message
+  ctx.fillStyle = '#666';
+  ctx.font = '11px monospace';
+  const thanks = 'Thank you for your punk!';
+  const thanksWidth = ctx.measureText(thanks).width;
+  ctx.fillText(thanks, 400 - thanksWidth / 2, 410);
+
+  // Continue hint (fade in/out)
+  const blinkAlpha = Math.abs(Math.sin(receiptTimer * 0.05));
+  ctx.fillStyle = 'rgba(139, 105, 20, ' + (0.3 + blinkAlpha * 0.4) + ')';
+  ctx.font = '11px monospace';
+  const continueText = '[PRESS SPACE / A to continue]';
+  const continueWidth = ctx.measureText(continueText).width;
+  ctx.fillText(continueText, 400 - continueWidth / 2, 435);
+}
+
+function draw() {
+  // Background music
+  if (gameState === 'playing' && !bgGain) startBackgroundMusic();
+  else if (gameState !== 'playing' && bgGain) stopBackgroundMusic();
+
+  ctx.clearRect(0, 0, GAME_W, GAME_H);
+  clearInteractiveRegions();
+
+  if (gameState === 'start') {
+    ctx.fillStyle = UI.bg;
+    ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+    ctx.fillStyle = 'rgba(57, 255, 20, 0.08)';
+    for (let i = 0; i < 12; i++) {
+      ctx.fillRect(36 + i * 62, 42 + (i % 3) * 20, 26, 4);
+    }
+
+    drawRoundedRect(38, 42, 724, 396, 18, 'rgba(12, 10, 18, 0.94)', UI.border);
+    drawPanel(58, 68, 300, 336, 'rgba(255,255,255,0.08)', 'rgba(14, 14, 22, 0.98)');
+    drawPanel(378, 68, 364, 336, 'rgba(255,255,255,0.08)', 'rgba(16, 14, 24, 0.98)');
+
+    ctx.fillStyle = UI.primary;
+    ctx.font = 'bold 11px monospace';
+    const leftKicker = 'CREATE YOUR PUNK';
+    ctx.fillText(leftKicker, 82, 92);
+
+    ctx.fillStyle = UI.text;
+    ctx.font = 'bold 40px monospace';
+    ctx.fillText('PUNK', 80, 128);
+    ctx.fillStyle = UI.secondary;
+    ctx.fillText('PLATFORMER', 80, 170);
+
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 12px monospace';
+    const leftSub1 = 'BUILD A LOOK. HIT PLAY.';
+    const leftSub2 = 'GRAB BEER. SMASH ROBOTS.';
+    ctx.fillText(leftSub1, 82, 206);
+    ctx.fillText(leftSub2, 82, 224);
+
+    drawPanel(106, 236, 204, 116, 'rgba(255,255,255,0.08)', 'rgba(20, 18, 30, 0.96)');
+    ctx.fillStyle = 'rgba(57,255,20,0.08)';
+    ctx.fillRect(120, 332, 176, 10);
+    ctx.fillStyle = 'rgba(255,79,216,0.12)';
+    ctx.fillRect(132, 338, 152, 6);
+
+    ctx.save();
+    ctx.translate(208, 312);
+    ctx.scale(3.3, 3.3);
+    drawPixelPunk(-14, -44, 1, 1, false);
+    ctx.restore();
+
+    drawPanel(88, 364, 240, 18, 'rgba(255,255,255,0.08)', 'rgba(22, 18, 30, 0.92)');
+    ctx.fillStyle = UI.accent;
+    ctx.font = 'bold 11px monospace';
+    const aliasLine = selectedAlias().toUpperCase();
+    ctx.fillText(aliasLine, 208 - ctx.measureText(aliasLine).width / 2, 376);
+
+    ctx.fillStyle = UI.primary;
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('CHARACTER CREATOR', 398, 92);
+
+    const creatorFields = [
+      { label: 'PRESET', value: selectedAlias().toUpperCase(), color: UI.text },
+      { label: 'HAIR', value: creatorOptions.hairColors[characterProfile.hairIndex].name.toUpperCase(), color: selectedHairColor() },
+      { label: 'SHIRT', value: creatorOptions.shirtColors[characterProfile.shirtIndex].name.toUpperCase(), color: selectedShirtColor() },
+      { label: 'PRINT', value: creatorOptions.shirtPatterns[characterProfile.patternIndex].name.toUpperCase(), color: UI.text },
+      { label: 'SKIN', value: creatorOptions.skinTones[characterProfile.skinIndex].name.toUpperCase(), color: selectedSkinTone() },
+      { label: 'PANTS', value: creatorOptions.pantsColors[characterProfile.pantsIndex].name.toUpperCase(), color: selectedPantsColor() },
+    ];
+
+    creatorFields.forEach((field, index) => {
+      const y = 102 + index * 36;
+      const selected = creatorSelection === index;
+      addInteractiveRegion(396, y, 328, 30, () => {
+        creatorSelection = index;
+        switch (index) {
+          case 0:
+            applyPreset((characterProfile.presetIndex + 1) % presetPlayers.length);
+            break;
+          case 1:
+            characterProfile.hairIndex = (characterProfile.hairIndex + 1) % creatorOptions.hairColors.length;
+            break;
+          case 2:
+            characterProfile.shirtIndex = (characterProfile.shirtIndex + 1) % creatorOptions.shirtColors.length;
+            break;
+          case 3:
+            characterProfile.patternIndex = (characterProfile.patternIndex + 1) % creatorOptions.shirtPatterns.length;
+            break;
+          case 4:
+            characterProfile.skinIndex = (characterProfile.skinIndex + 1) % creatorOptions.skinTones.length;
+            break;
+          case 5:
+            characterProfile.pantsIndex = (characterProfile.pantsIndex + 1) % creatorOptions.pantsColors.length;
+            break;
+        }
+      }, () => {
+        creatorSelection = index;
+      });
+      drawPanel(396, y, 328, 30, selected ? UI.primary : 'rgba(255,255,255,0.08)', selected ? 'rgba(57,255,20,0.12)' : 'rgba(18,16,28,0.94)');
+      if (selected) {
+        ctx.fillStyle = 'rgba(57,255,20,0.1)';
+        ctx.fillRect(400, y + 3, 320, 24);
+      }
+      ctx.fillStyle = UI.textDim;
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText(field.label, 412, y + 10);
+      ctx.fillStyle = field.color;
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(field.value, 544 - ctx.measureText(field.value).width / 2, y + 20);
+      ctx.fillStyle = UI.textDim;
+      ctx.font = 'bold 10px monospace';
+      const arrows = '<   >';
+      ctx.fillText(arrows, 710 - ctx.measureText(arrows).width, y + 19);
+    });
+
+    const settingsSelected = creatorSelection === 6;
+    addInteractiveRegion(396, 354, 156, 34, () => {
+      creatorSelection = 6;
+      gameState = 'settings';
+      settingsSelection = 0;
+      characterProfile.pendingResolutionIndex = characterProfile.resolutionIndex;
+    }, () => {
+      creatorSelection = 6;
+    });
+    drawPanel(396, 354, 156, 34, settingsSelected ? UI.accent : UI.border, settingsSelected ? 'rgba(255,204,0,0.18)' : 'rgba(18,16,28,0.94)');
+    ctx.fillStyle = settingsSelected ? UI.accent : UI.textDim;
+    ctx.font = 'bold 14px monospace';
+    const settingsText = 'SETTINGS';
+    ctx.fillText(settingsText, 474 - ctx.measureText(settingsText).width / 2, 376);
+
+    const playSelected = creatorSelection === 7;
+    addInteractiveRegion(568, 354, 156, 34, () => {
+      creatorSelection = 7;
+      startGame();
+    }, () => {
+      creatorSelection = 7;
+    });
+    drawPanel(568, 354, 156, 34, playSelected ? UI.secondary : UI.primary, playSelected ? 'rgba(255,79,216,0.18)' : 'rgba(57,255,20,0.14)');
+    ctx.fillStyle = playSelected ? UI.secondary : UI.primary;
+    ctx.font = 'bold 15px monospace';
+    const playText = 'PLAY THE RIOT';
+    ctx.fillText(playText, 646 - ctx.measureText(playText).width / 2, 376);
+
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText('ARROWS / STICK NAVIGATE', 396, 402);
+    ctx.fillText('E / ENTER / A SELECT', 396, 416);
+    ctx.fillText('SPACE / START PLAY', 564, 416);
+
+    if (ownedGuitars.length > 0) {
+      drawPanel(58, 412, 684, 18, 'rgba(255, 204, 0, 0.18)', 'rgba(18, 16, 26, 0.9)');
+      ctx.fillStyle = UI.accent;
+      ctx.font = 'bold 10px monospace';
+      const ownedNames = ownedGuitars.map(i => guitarTypes[i].name).join(', ');
+      const ownedLine = 'LOCKER: ' + ownedNames.toUpperCase();
+      ctx.fillText(ownedLine, 400 - ctx.measureText(ownedLine).width / 2, 424);
+    }
+    return;
+  }
+
+  if (gameState === 'settings') {
+    ctx.fillStyle = UI.bg;
+    ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+    drawRoundedRect(116, 68, 568, 340, 18, 'rgba(12, 10, 18, 0.94)', UI.border);
+    ctx.fillStyle = UI.primary;
+    ctx.font = 'bold 14px monospace';
+    const settingsTitle = 'DISPLAY SETTINGS';
+    ctx.fillText(settingsTitle, 400 - ctx.measureText(settingsTitle).width / 2, 106);
+
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 11px monospace';
+    const settingsSub = 'CHOOSE A RESOLUTION THAT FITS YOUR SCREEN';
+    ctx.fillText(settingsSub, 400 - ctx.measureText(settingsSub).width / 2, 128);
+
+    const resolutionSelected = settingsSelection === 0;
+    addInteractiveRegion(170, 166, 460, 46, () => {
+      settingsSelection = 0;
+      characterProfile.pendingResolutionIndex = (characterProfile.pendingResolutionIndex + 1) % creatorOptions.resolutions.length;
+    }, () => {
+      settingsSelection = 0;
+    });
+    drawPanel(170, 166, 460, 46, resolutionSelected ? UI.primary : 'rgba(255,255,255,0.08)', resolutionSelected ? 'rgba(57,255,20,0.12)' : 'rgba(18,16,28,0.94)');
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('RESOLUTION', 190, 180);
+    ctx.fillStyle = UI.accent;
+    ctx.font = 'bold 18px monospace';
+    const resolutionText = pendingResolution().name;
+    ctx.fillText(resolutionText, 400 - ctx.measureText(resolutionText).width / 2, 201);
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 12px monospace';
+    const arrows = '<   >';
+    ctx.fillText(arrows, 606 - ctx.measureText(arrows).width, 195);
+
+    const applySelected = settingsSelection === 1;
+    addInteractiveRegion(170, 236, 460, 34, () => {
+      settingsSelection = 1;
+      characterProfile.resolutionIndex = characterProfile.pendingResolutionIndex;
+      applyDisplayResolution();
+    }, () => {
+      settingsSelection = 1;
+    });
+    drawPanel(170, 236, 460, 34, applySelected ? UI.primary : 'rgba(255,255,255,0.08)', applySelected ? 'rgba(57,255,20,0.14)' : 'rgba(18,16,28,0.94)');
+    ctx.fillStyle = applySelected ? UI.primary : UI.textDim;
+    ctx.font = 'bold 14px monospace';
+    const applyText = 'APPLY RESOLUTION';
+    ctx.fillText(applyText, 400 - ctx.measureText(applyText).width / 2, 258);
+
+    const backSelected = settingsSelection === 2;
+    addInteractiveRegion(250, 288, 300, 34, () => {
+      settingsSelection = 2;
+      characterProfile.pendingResolutionIndex = characterProfile.resolutionIndex;
+      gameState = 'start';
+    }, () => {
+      settingsSelection = 2;
+    });
+    drawPanel(250, 288, 300, 34, backSelected ? UI.secondary : UI.border, backSelected ? 'rgba(255,79,216,0.18)' : 'rgba(18,16,28,0.94)');
+    ctx.fillStyle = backSelected ? UI.secondary : UI.textDim;
+    ctx.font = 'bold 14px monospace';
+    const backText = 'BACK TO CREATOR';
+    ctx.fillText(backText, 400 - ctx.measureText(backText).width / 2, 310);
+
+    ctx.fillStyle = UI.textDim;
+    ctx.font = 'bold 10px monospace';
+    const currentLine = 'CURRENT: ' + selectedResolution().name;
+    ctx.fillText(currentLine, 400 - ctx.measureText(currentLine).width / 2, 348);
+    ctx.fillText('LEFT / RIGHT CHANGE   //   E / ENTER / A SELECT', 400 - ctx.measureText('LEFT / RIGHT CHANGE   //   E / ENTER / A SELECT').width / 2, 366);
+    ctx.fillText('SPACE / ESC / START RETURN', 400 - ctx.measureText('SPACE / ESC / START RETURN').width / 2, 382);
+    return;
+  }
+
+  if (gameState === 'receipt') {
+    updateReceipt();
+    drawReceipt();
+    return;
+  }
+
+  if (gameState === 'shop') {
+    updateShop();
+    drawShop();
+    return;
+  }
+
+  if (gameState === 'gameover') {
+    ctx.fillStyle = UI.bg;
+    ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+    // Panel
+    drawRoundedRect(180, 100, 440, 280, 16, UI.panelBg, UI.danger);
+
+    ctx.fillStyle = UI.danger;
+    ctx.font = 'bold 48px monospace';
+    ctx.fillText('GAME OVER', 280, 180);
+
+    ctx.fillStyle = UI.text;
+    ctx.font = '24px monospace';
+    ctx.fillText('Score: ' + score, 340, 240);
+    ctx.fillStyle = UI.accent;
+    ctx.fillText('Beer earned: ' + score, 330, 280);
+
+    // Retry button
+    drawRoundedRect(280, 310, 240, 50, 8, UI.primary, UI.primary);
+    ctx.fillStyle = UI.bg;
+    ctx.font = 'bold 18px monospace';
+    const retryText = 'PRESS SPACE / A TO RETRY';
+    const retryWidth = ctx.measureText(retryText).width;
+    ctx.fillText(retryText, 400 - retryWidth / 2, 340);
+    return;
+  }
+
+  if (gameState === 'win') {
+    ctx.fillStyle = UI.bg;
+    ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+    // Panel
+    drawRoundedRect(180, 100, 440, 280, 16, UI.panelBg, UI.success);
+
+    ctx.fillStyle = UI.success;
+    ctx.font = 'bold 48px monospace';
+    ctx.fillText('YOU WIN!', 310, 175);
+
+    ctx.fillStyle = UI.primary;
+    ctx.font = 'bold 28px monospace';
+    ctx.fillText('Score: ' + score, 330, 235);
+
+    ctx.fillStyle = UI.accent;
+    ctx.font = '24px monospace';
+    ctx.fillText('Total beer: ' + totalBeer, 320, 280);
+
+    // Shop button
+    drawRoundedRect(250, 310, 300, 50, 8, UI.secondary, UI.secondary);
+    ctx.fillStyle = UI.bg;
+    ctx.font = 'bold 18px monospace';
+    const shopText = 'PRESS SPACE / A FOR SHOP';
+    const shopWidth = ctx.measureText(shopText).width;
+    ctx.fillText(shopText, 400 - shopWidth / 2, 340);
+    return;
+  }
+
+  // Game
+  drawBackground();
+  platforms.forEach(drawPlatform);
+  drawFlag();
+  beerCans.forEach(drawCoin);
+  enemies.forEach(drawEnemy);
+
+  const blink = player.invincible && Math.floor(player.invincibleTimer / 6) % 2 === 0;
+  if (!blink) drawPixelPunk(player.x - camX, player.y, player.facing, player.animFrame, player.hasGuitar);
+
+  drawHUD();
+}
+
+// ---- Game Loop ----
+let lastTime = 0;
+function loop(time) {
+  pollGamepad();
+  update();
+  handleGameStateTransitions();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---- Start / Restart ----
+function startGame() {
+  score = 0;
+  lives = 3;
+  resetPlayer();
+  buildLevel();
+  camX = 0;
+  shopCol = 0;
+  shopRow = 0;
+
+  // Equip best owned guitar
+  if (ownedGuitars.length > 0) {
+    player.hasGuitar = true;
+    // Find best guitar (highest damage, then by index as proxy for tier)
+    let bestIdx = ownedGuitars[0];
+    for (const idx of ownedGuitars) {
+      if (guitarTypes[idx].damage > guitarTypes[bestIdx].damage ||
+          (guitarTypes[idx].damage === guitarTypes[bestIdx].damage && idx > bestIdx)) {
+        bestIdx = idx;
+      }
+    }
+    player.guitarType = bestIdx;
+  } else {
+    player.hasGuitar = false;
+  }
+
+  gameState = 'playing';
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+window.addEventListener('keydown', e => {
+  // Space handled by handleGameStateTransitions() now
+  // This listener kept for future custom key handling if needed
+});
+
+buildLevel();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
