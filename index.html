@@ -320,7 +320,9 @@ const guitarImagePaths = {
   explorer: 'guitars/explorer.png',
   vshape: 'guitars/vguitar.png',
   firebird: 'guitars/firebird.png',
-  iceman: 'guitars/iceman.png'
+  iceman: 'guitars/iceman.png',
+  // Special reward guitar - unlocked after defeating the final boss once.
+  diy_punk: 'guitars/diy_punk_guitar.png'
 };
 const guitarImages = {};
 let guitarImagesReady = false;
@@ -412,11 +414,42 @@ const MUSIC_THEMES = {
     lead: 'sawtooth',
     pad: 'square',
   },
+  5: {
+    // Neon synthwave - pulsing arpeggio over detuned square pad
+    melody: [196.00, 261.63, 329.63, 261.63, 196.00, 261.63, 392.00, 329.63,
+             174.61, 220.00, 293.66, 220.00, 174.61, 220.00, 293.66, 349.23],
+    harmony: [98.00, 146.83],
+    tempo: 160,
+    lead: 'square',
+    pad: 'sawtooth',
+  },
+  // Final-boss theme - heavier, slower, menacing
+  boss: {
+    melody: [110.00, 146.83, 110.00, 164.81, 110.00, 174.61, 110.00, 164.81,
+             98.00,  130.81, 98.00,  155.56, 98.00,  164.81, 98.00,  155.56],
+    harmony: [55.00, 82.41],
+    tempo: 200,
+    lead: 'sawtooth',
+    pad: 'square',
+  },
+  // Victory theme - heavy, upbeat metal riff played during the post-boss
+  // guitar-solo performance. Fast galloping power-chord pattern in E / A.
+  victory: {
+    melody: [164.81, 164.81, 246.94, 164.81, 207.65, 164.81, 246.94, 329.63,
+             220.00, 220.00, 329.63, 220.00, 277.18, 220.00, 329.63, 440.00,
+             196.00, 293.66, 392.00, 293.66, 329.63, 246.94, 196.00, 164.81,
+             164.81, 207.65, 246.94, 329.63, 246.94, 207.65, 164.81, 123.47],
+    harmony: [82.41, 123.47],
+    tempo: 120,
+    lead: 'sawtooth',
+    pad: 'square',
+  },
 };
 
-function startBackgroundMusic() {
+function startBackgroundMusic(forceTheme) {
   if (bgGain) return; // already playing
-  const theme = MUSIC_THEMES[currentLevel] || MUSIC_THEMES[1];
+  const themeKey = forceTheme || (performanceActive ? 'victory' : (bossActive ? 'boss' : currentLevel));
+  const theme = MUSIC_THEMES[themeKey] || MUSIC_THEMES[1];
 
   bgGain = audioCtx.createGain();
   bgGain.gain.value = currentVolume();
@@ -533,6 +566,18 @@ let score = 0;
 let totalBeer = 0; // persistent across runs
 let lives = 3;
 let receiptTimer = 0;
+// Run-wide statistics for the end-of-game victory screen. Reset only on a brand
+// new playthrough (currentLevel === 1 in startGame).
+let runStartMs = 0;
+let runEndMs = 0;
+let enemiesKilled = 0;
+let beerCollected = 0;
+let moneySpent = 0;
+// Boss outro "performance" phase - after defeating the boss the hero walks to
+// center stage and plays a heavy metal riff before the VICTORY screen appears.
+let performanceActive = false;
+let performanceTimer = 0;
+const PERFORMANCE_DURATION = 360; // ~6 seconds at 60fps
 let receiptItemsList = []; // Items shown in receipt
 const creatorOptions = {
   names: ['Riot', 'Nova', 'Spike', 'Vex', 'Echo', 'Razor', 'Blitz', 'Nina', 'Sid', 'Lux', 'Crash', 'Zero'],
@@ -605,18 +650,51 @@ const PAUSE_ITEMS = ['Resume', 'Settings', 'Exit to Menu'];
 // Shape types: strat, mustang, jaguar, lespaul, superstart, explorer, vshape
 // Each guitar has a UNIQUE damage value and a progressively harder price - the final
 // guitar (V-Guitar) is intended to be affordable only after ~3-4 winning runs.
+// Prices bumped so buying a guitar meaningfully drains the player's beer stash
+// instead of feeling like pocket change next to per-level income.
 const guitarTypes = [
-  { name: 'Stratocaster', price: 150,  damage: 1, color: '#d4a556', shape: 'strat' },
-  { name: 'Telecaster',   price: 320,  damage: 2, color: '#c9a961', shape: 'mustang' },
-  { name: 'Jaguar',       price: 560,  damage: 3, color: '#2b8cc4', shape: 'jaguar' },
-  { name: 'Les Paul',     price: 900,  damage: 4, color: '#cc3a1f', shape: 'lespaul' },
-  { name: 'Superstrat',   price: 1400, damage: 5, color: '#0066bb', shape: 'superstart' },
-  { name: 'Explorer',     price: 2000, damage: 6, color: '#f5f5f5', shape: 'explorer' },
-  { name: 'Firebird',     price: 2800, damage: 7, color: '#ff6f18', shape: 'firebird' },
-  { name: 'Iceman',       price: 3800, damage: 8, color: '#6fdfff', shape: 'iceman' },
-  { name: 'V-Guitar',     price: 5200, damage: 9, color: '#cc1111', shape: 'vshape' },
+  { name: 'Stratocaster', price: 220,  damage: 1, color: '#d4a556', shape: 'strat' },
+  { name: 'Telecaster',   price: 460,  damage: 2, color: '#c9a961', shape: 'mustang' },
+  { name: 'Jaguar',       price: 800,  damage: 3, color: '#2b8cc4', shape: 'jaguar' },
+  { name: 'Les Paul',     price: 1300, damage: 4, color: '#cc3a1f', shape: 'lespaul' },
+  { name: 'Superstrat',   price: 2000, damage: 5, color: '#0066bb', shape: 'superstart' },
+  { name: 'Explorer',     price: 2900, damage: 6, color: '#f5f5f5', shape: 'explorer' },
+  { name: 'Firebird',     price: 4000, damage: 7, color: '#ff6f18', shape: 'firebird' },
+  { name: 'Iceman',       price: 5400, damage: 10, color: '#6fdfff', shape: 'iceman' },
+  { name: 'V-Guitar',     price: 7200, damage: 15, color: '#cc1111', shape: 'vshape' },
 ];
 let ownedGuitars = [];
+
+// DIY Punk Guitar - a unique reward unlocked only after the player has beaten
+// the final boss at least once. Appears in the shop on subsequent playthroughs,
+// free of charge (consider it the scene-cred reward) with the highest damage.
+const DIY_PUNK_GUITAR = {
+  name: 'DIY Punk Guitar',
+  price: 0,
+  damage: 30,
+  color: '#ff2aa0',
+  shape: 'diy_punk',
+};
+const BOSS_BEATEN_KEY = 'punkPlatformer.bossBeaten';
+let bossBeatenEver = false;
+try { bossBeatenEver = localStorage.getItem(BOSS_BEATEN_KEY) === '1'; } catch (e) { /* localStorage blocked */ }
+
+function unlockDiyPunkGuitar() {
+  // Beating the boss only makes the guitar VISIBLE in the shop - the player
+  // still has to visit the shop to claim it. Because its price is 0 it's
+  // effectively free (confirms with a "FREE - EARNED" status), but it must be
+  // actively acquired: we never push it into ownedGuitars here.
+  if (guitarTypes.some(g => g.shape === 'diy_punk')) return;
+  guitarTypes.push(DIY_PUNK_GUITAR);
+  // Grow the shop grid if needed so the new card is reachable.
+  SHOP_ROWS = Math.max(SHOP_ROWS, Math.ceil(guitarTypes.length / SHOP_COLS));
+}
+
+function markBossBeaten() {
+  bossBeatenEver = true;
+  try { localStorage.setItem(BOSS_BEATEN_KEY, '1'); } catch (e) { /* ignore */ }
+  unlockDiyPunkGuitar();
+}
 
 // ---- Punk Shop Items for Receipt ----
 const punkShopItems = [
@@ -659,16 +737,46 @@ function generateReceiptItems(beerCollected) {
 const TILE = 32;
 const platforms = [];
 const beerCans = [];
+// High-altitude reward pickups (one per level). The player must navigate a
+// tricky vertical side-platform route to claim them.
+const rewardPickups = [];
+// Cosmetic shockwave/pedal effects spawned when a distortion pedal is triggered.
+// Kept global so they can fade out independently of the player-state animation.
+const pedalEffects = [];
+// Per-level reward configuration - which reward sits on the high platform and
+// where to place the helper platforms leading up to it.
+// Hearts top up `lives` (capped at MAX_LIVES); pedals add a charge of the
+// distortion-pedal AoE weapon (capped at MAX_PEDAL_CHARGES).
+const REWARD_SPOTS = {
+  1: { reward: 'pedal', baseX: 1800 },
+  2: { reward: 'heart', baseX: 2400 },
+  3: { reward: 'pedal', baseX: 2100 },
+  4: { reward: 'heart', baseX: 3500 },
+  5: { reward: 'pedal', baseX: 4800 },
+};
+// ---- Distortion Pedal ----
+const PEDAL_ANIM_DURATION = 48;   // frames for the stomp animation
+const PEDAL_COOLDOWN      = 90;   // frames of lockout after a trigger
+const PEDAL_DAMAGE        = 30;   // damage dealt to every enemy inside PEDAL_RADIUS
+const PEDAL_RADIUS        = 120;  // AoE radius in pixels
+const MAX_PEDAL_CHARGES   = 5;
+const MAX_LIVES           = 5;    // bonus hearts from rewards can push past the usual 3
 const enemies = [];
 const poisonSources = []; // Ceiling drippers (level 4) that periodically spawn drops.
 const poisonDrops = [];   // Falling acid droplets - damage the player on contact.
+// Final-boss state (activated after beating level 5).
+let boss = null;
+let bossActive = false;       // true while the player is in the boss arena
+let bossOutroTimer = 0;       // death sequence countdown before the victory screen
+const bossProjectiles = [];   // energy bullets fired by the boss
 let currentLevel = 1;
-const TOTAL_LEVELS = 4;
+const TOTAL_LEVELS = 5;
 const LEVEL_NAMES = {
   1: 'City Streets',
   2: 'Village Outskirts',
   3: 'Junkyard',
   4: 'Sewers',
+  5: 'Neon Cyber City',
 };
 let levelDeathCount = 0; // Tracks deaths on the current non-level-1 level.
 const MAX_DEATHS_PER_LEVEL = 3;
@@ -681,9 +789,11 @@ function buildLevel(level = currentLevel) {
   enemies.length = 0;
   poisonDrops.length = 0;
   poisonSources.length = 0;
+  rewardPickups.length = 0;
+  pedalEffects.length = 0;
 
-  // Level 4 is noticeably longer than the other levels - a deep sewer crawl.
-  LEVEL_W = level === 4 ? 7200 : 4500;
+  // Levels 4 and 5 are noticeably longer - crawl through sewer then run the neon city.
+  LEVEL_W = level === 5 ? 9500 : (level === 4 ? 7200 : 4500);
 
   // Ground
   for (let x = 0; x < LEVEL_W; x += TILE) {
@@ -692,7 +802,131 @@ function buildLevel(level = currentLevel) {
 
   let layout, enemyPositions, goldenPositions;
 
-  if (level === 4) {
+  if (level === 5) {
+    // -- Level 5: Neon cyber city. Runs over rooftops with drones, cyber-soldiers,
+    //    and hulking big-bots. Ends at a rooftop leading to the boss arena. --
+    layout = [
+      { x: 140, y: 390, w: 3 },
+      { x: 320, y: 340, w: 4 },
+      { x: 520, y: 300, w: 3 },
+      { x: 700, y: 360, w: 4 },
+      { x: 900, y: 310, w: 3 },
+      { x: 1080, y: 370, w: 4 },
+      { x: 1280, y: 320, w: 3 },
+      { x: 1480, y: 280, w: 4 },
+      { x: 1700, y: 340, w: 3 },
+      { x: 1880, y: 290, w: 4 },
+      { x: 2080, y: 360, w: 3 },
+      { x: 2280, y: 310, w: 4 },
+      { x: 2480, y: 270, w: 3 },
+      { x: 2680, y: 340, w: 4 },
+      { x: 2880, y: 290, w: 3 },
+      { x: 3080, y: 360, w: 4 },
+      { x: 3280, y: 310, w: 3 },
+      { x: 3480, y: 270, w: 4 },
+      { x: 3700, y: 340, w: 3 },
+      { x: 3900, y: 300, w: 4 },
+      { x: 4100, y: 360, w: 3 },
+      { x: 4300, y: 310, w: 4 },
+      { x: 4520, y: 270, w: 3 },
+      { x: 4720, y: 340, w: 4 },
+      { x: 4920, y: 290, w: 3 },
+      { x: 5120, y: 360, w: 4 },
+      { x: 5320, y: 310, w: 3 },
+      { x: 5520, y: 270, w: 4 },
+      { x: 5740, y: 340, w: 3 },
+      { x: 5940, y: 300, w: 4 },
+      { x: 6140, y: 360, w: 3 },
+      { x: 6340, y: 310, w: 4 },
+      { x: 6560, y: 270, w: 3 },
+      { x: 6760, y: 340, w: 4 },
+      { x: 6960, y: 290, w: 3 },
+      { x: 7160, y: 360, w: 4 },
+      { x: 7380, y: 310, w: 3 },
+      { x: 7580, y: 270, w: 4 },
+      { x: 7800, y: 340, w: 3 },
+      { x: 8000, y: 300, w: 4 },
+      { x: 8220, y: 360, w: 3 },
+      { x: 8420, y: 320, w: 4 },
+      { x: 8640, y: 280, w: 3 },
+      { x: 8840, y: 340, w: 4 },
+      { x: 9100, y: 380, w: 4 }, // Landing pad near the boss gate
+    ];
+
+    enemyPositions = [
+      // Drones - weakest, patrol vertically (HP 4)
+      { x: 460,  y: 240, type: 'drone', minY: 140, maxY: 340, vy: 1.6 },
+      { x: 860,  y: 240, type: 'drone', minY: 150, maxY: 350, vy: 1.8 },
+      { x: 1260, y: 240, type: 'drone', minY: 140, maxY: 330, vy: 1.5 },
+      { x: 1660, y: 240, type: 'drone', minY: 160, maxY: 360, vy: 2.0 },
+      { x: 2060, y: 240, type: 'drone', minY: 150, maxY: 340, vy: 1.7 },
+      { x: 2460, y: 240, type: 'drone', minY: 140, maxY: 330, vy: 1.9 },
+      { x: 2860, y: 240, type: 'drone', minY: 160, maxY: 360, vy: 1.6 },
+      { x: 3260, y: 240, type: 'drone', minY: 150, maxY: 350, vy: 1.8 },
+      { x: 3660, y: 240, type: 'drone', minY: 140, maxY: 330, vy: 2.0 },
+      { x: 4060, y: 240, type: 'drone', minY: 160, maxY: 360, vy: 1.5 },
+      { x: 4460, y: 240, type: 'drone', minY: 140, maxY: 340, vy: 1.7 },
+      { x: 4860, y: 240, type: 'drone', minY: 150, maxY: 350, vy: 1.9 },
+      { x: 5260, y: 240, type: 'drone', minY: 140, maxY: 340, vy: 1.6 },
+      { x: 5660, y: 240, type: 'drone', minY: 160, maxY: 360, vy: 1.8 },
+      { x: 6060, y: 240, type: 'drone', minY: 150, maxY: 350, vy: 2.0 },
+      { x: 6460, y: 240, type: 'drone', minY: 140, maxY: 330, vy: 1.7 },
+      { x: 6860, y: 240, type: 'drone', minY: 160, maxY: 360, vy: 1.5 },
+      { x: 7260, y: 240, type: 'drone', minY: 150, maxY: 340, vy: 1.9 },
+      { x: 7660, y: 240, type: 'drone', minY: 140, maxY: 330, vy: 1.8 },
+      { x: 8060, y: 240, type: 'drone', minY: 160, maxY: 360, vy: 1.6 },
+      { x: 8460, y: 240, type: 'drone', minY: 150, maxY: 340, vy: 2.0 },
+      // Cyber-soldiers - mid-tier (HP 8), patrol the ground lanes. y = 448 puts
+      // their feet on the ground plane, matching the player's stance.
+      { x: 600,  y: 448, type: 'soldier', min: 520,  max: 720  },
+      { x: 1400, y: 448, type: 'soldier', min: 1320, max: 1520 },
+      { x: 2200, y: 448, type: 'soldier', min: 2120, max: 2320 },
+      { x: 3000, y: 448, type: 'soldier', min: 2920, max: 3120 },
+      { x: 3800, y: 448, type: 'soldier', min: 3720, max: 3920 },
+      { x: 4600, y: 448, type: 'soldier', min: 4520, max: 4720 },
+      { x: 5400, y: 448, type: 'soldier', min: 5320, max: 5520 },
+      { x: 6200, y: 448, type: 'soldier', min: 6120, max: 6320 },
+      { x: 7000, y: 448, type: 'soldier', min: 6920, max: 7120 },
+      { x: 7800, y: 448, type: 'soldier', min: 7720, max: 7920 },
+      { x: 8600, y: 448, type: 'soldier', min: 8520, max: 8720 },
+      // Big-bots - heavyweights (HP 10). Periodically jump between the ground lane
+      // and a nearby rooftop via a parabolic arc (see `verticalStops`).
+      { x: 1800, y: 448, type: 'bigbot', min: 1700, max: 1920,
+        verticalStops: [
+          { y: 448, min: 1700, max: 1920 },
+          { y: 340, min: 1720, max: 1790 }, // on the rooftop at x=1700
+        ] },
+      { x: 3400, y: 448, type: 'bigbot', min: 3300, max: 3520,
+        verticalStops: [
+          { y: 448, min: 3300, max: 3520 },
+          { y: 310, min: 3300, max: 3370 }, // rooftop at x=3280
+        ] },
+      { x: 5000, y: 448, type: 'bigbot', min: 4900, max: 5120,
+        verticalStops: [
+          { y: 448, min: 4900, max: 5120 },
+          { y: 290, min: 4940, max: 5010 }, // rooftop at x=4920
+        ] },
+      { x: 6600, y: 448, type: 'bigbot', min: 6500, max: 6720,
+        verticalStops: [
+          { y: 448, min: 6500, max: 6720 },
+          { y: 270, min: 6580, max: 6650 }, // rooftop at x=6560
+        ] },
+      { x: 8200, y: 448, type: 'bigbot', min: 8100, max: 8320,
+        verticalStops: [
+          { y: 448, min: 8100, max: 8320 },
+          { y: 360, min: 8240, max: 8310 }, // rooftop at x=8220
+        ] },
+    ];
+
+    goldenPositions = [
+      { x: 1100, y: 240 },
+      { x: 2500, y: 230 },
+      { x: 3900, y: 240 },
+      { x: 5300, y: 230 },
+      { x: 6700, y: 240 },
+      { x: 8100, y: 230 },
+    ];
+  } else if (level === 4) {
     // -- Level 4: Underground sewers with rats and speeding toxic carts (dashers) --
     layout = [
       { x: 160, y: 380, w: 3 },
@@ -998,6 +1232,17 @@ function buildLevel(level = currentLevel) {
     else if (type === 'brute') vx = 0.9;
     else if (type === 'rat') vx = 2.2;
     else if (type === 'dasher') vx = 0; // set on spawn
+    else if (type === 'drone') vx = 0;   // drone moves only vertically
+    else if (type === 'soldier') vx = 1.4;
+    else if (type === 'bigbot') vx = 0.7;
+
+    // HP per enemy type. Level-3 brute is a mid-game roadblock; level-5 trio
+    // (cyber-drone / cyber-cop / heavy bot) scales up as the final challenge.
+    let hp = 1;
+    if (type === 'brute') hp = 11;
+    else if (type === 'drone') hp = 4;
+    else if (type === 'soldier') hp = 10;
+    else if (type === 'bigbot') hp = 30;
 
     const enemy = {
       x: e.x, y: e.y,
@@ -1008,11 +1253,25 @@ function buildLevel(level = currentLevel) {
       vy: e.vy || 0,
       minY: e.minY || 0,
       maxY: e.maxY || 0,
-      hp: type === 'brute' ? 7 : 1,
-      maxHp: type === 'brute' ? 7 : 1,
+      hp,
+      maxHp: hp,
       hitCooldown: 0,
       hitFlash: 0,
     };
+
+    // Optional vertical patrol path for big-bots: an array of {y, min, max} stops
+    // the enemy periodically jumps between, giving it multi-platform reach.
+    if (e.verticalStops && e.verticalStops.length > 1) {
+      enemy.verticalStops = e.verticalStops;
+      enemy.currentStop = 0;
+      enemy.jumpTimer = 120 + Math.floor(Math.random() * 120);
+      enemy.jumpPhase = 'idle';  // 'idle' | 'jumping'
+      enemy.jumpProgress = 0;
+      enemy.jumpFromX = e.x;
+      enemy.jumpFromY = e.y;
+      enemy.jumpToX = e.x;
+      enemy.jumpToY = e.y;
+    }
 
     if (type === 'dasher') {
       // Screen-relative sprinters: spawn just off the visible screen edge and sprint
@@ -1026,8 +1285,293 @@ function buildLevel(level = currentLevel) {
     enemies.push(enemy);
   });
 
+  // --- High-altitude reward spot ---
+  // A short staircase of tiny floating platforms leads up to a single tile
+  // perched high above the action. Reaching it awards either an extra heart
+  // or a distortion-pedal charge, depending on the level.
+  const spot = REWARD_SPOTS[level];
+  if (spot) {
+    const bx = spot.baseX;
+    // Stepping stones - widely spaced and small so the route demands precision.
+    // y values are tuned so each step is near the edge of the player's max
+    // jump height (~144 px), forcing careful timing.
+    const steps = [
+      { x: bx,            y: 300, w: 1 }, // entry stone
+      { x: bx + 110,      y: 230, w: 1 },
+      { x: bx + 220,      y: 160, w: 1 },
+      { x: bx + 330,      y: 100, w: 2 }, // reward ledge
+    ];
+    steps.forEach(p => {
+      for (let i = 0; i < p.w; i++) {
+        platforms.push({ x: p.x + i * TILE, y: p.y, w: TILE, h: TILE, type: 'brick' });
+      }
+    });
+    // Reward itself rests on top of the last ledge.
+    const ledgeTop = 100;
+    const rewardX = bx + 330 + TILE; // centered over the 2-wide ledge
+    rewardPickups.push({
+      x: rewardX,
+      y: ledgeTop - 24,
+      type: spot.reward,
+      collected: false,
+      bobTimer: Math.random() * Math.PI * 2,
+    });
+  }
+
   // Goal flag
-  player.goalX = level === 4 ? 7100 : 4400;
+  player.goalX = level === 5 ? 9380 : (level === 4 ? 7100 : 4400);
+}
+
+// Enters the final-boss arena. Wipes the current level and stages a single-screen
+// fight with the Mega-Corp Titan. Called when the player touches the goal flag on
+// level 5 (instead of the normal shop transition).
+function enterBossArena() {
+  bossActive = true;
+  bossOutroTimer = 0;
+  platforms.length = 0;
+  enemies.length = 0;
+  beerCans.length = 0;
+  poisonDrops.length = 0;
+  poisonSources.length = 0;
+  bossProjectiles.length = 0;
+
+  LEVEL_W = GAME_W;
+  camX = 0;
+
+  // Arena floor
+  for (let x = 0; x < GAME_W; x += TILE) {
+    platforms.push({ x, y: 448, w: TILE, h: TILE, type: 'ground' });
+  }
+  // Multi-tier platform layout for generous vertical maneuvering space.
+  // Low tier - near-ground dashing between corners.
+  platforms.push({ x: 40,   y: 378, w: 120, h: 14, type: 'floating' });
+  platforms.push({ x: 640,  y: 378, w: 120, h: 14, type: 'floating' });
+  // Mid tier - stepping stones between low and center.
+  platforms.push({ x: 200,  y: 316, w: 100, h: 14, type: 'floating' });
+  platforms.push({ x: 500,  y: 316, w: 100, h: 14, type: 'floating' });
+  // Upper tier - central vantage + staggered side ledges.
+  platforms.push({ x: 340,  y: 256, w: 120, h: 14, type: 'floating' });
+  platforms.push({ x: 80,   y: 208, w: 90,  h: 14, type: 'floating' });
+  platforms.push({ x: 630,  y: 208, w: 90,  h: 14, type: 'floating' });
+  // Top ledge - risky perch, great for dropping guitar slams.
+  platforms.push({ x: 360,  y: 148, w: 80,  h: 14, type: 'floating' });
+  // Two RED shield platforms - walkable by the player but DETONATE boss rockets
+  // on contact. Placed between the mid and upper tiers so they cover the most
+  // common rocket flight paths from the boss towards the player.
+  platforms.push({ x: 150,  y: 266, w: 90,  h: 14, type: 'floating', shield: true });
+  platforms.push({ x: 560,  y: 266, w: 90,  h: 14, type: 'floating', shield: true });
+
+  // Reset player to the left side of the arena
+  player.x = 70;
+  player.y = 380;
+  player.vx = 0;
+  player.vy = 0;
+  player.invincible = true;
+  player.invincibleTimer = 60; // brief grace period on arena entry
+  // Fully refill lives before the final fight - any damage taken on level 5
+  // should not carry into the boss encounter.
+  lives = 3;
+  // Disable any flag-based win check.
+  player.goalX = 1e9;
+
+  // Spawn the final boss on the right side of the arena.
+  boss = {
+    x: GAME_W - 140,
+    y: 448, // feet on the arena floor
+    vx: -1.1,
+    vy: 0,
+    min: 160,
+    max: GAME_W - 80,
+    alive: true,
+    type: 'boss',
+    hp: 60,
+    maxHp: 60,
+    hitCooldown: 0,
+    hitFlash: 0,
+    attackTimer: 160,   // counts down between volleys
+    phase: 'patrol',    // 'patrol' | 'telegraph' | 'volley' | 'slam'
+    phaseTimer: 0,
+    slamCooldown: 420,
+  };
+  enemies.push(boss);
+
+  // Swap music to boss theme.
+  stopBackgroundMusic();
+  startBackgroundMusic();
+}
+
+// Cycles the boss through attack phases: patrol -> telegraph -> volley/slam.
+// The boss never moves vertically on its own; horizontal patrol between min/max,
+// with periodic projectile volleys and an occasional forward "slam" dash.
+function updateBossAI(b) {
+  if (!b.alive || bossOutroTimer > 0) return;
+
+  b.phaseTimer = Math.max(0, (b.phaseTimer || 0) - 1);
+  b.slamCooldown = Math.max(0, (b.slamCooldown || 0) - 1);
+
+  if (b.phase === 'patrol') {
+    b.x += b.vx;
+    if (b.x <= b.min || b.x >= b.max) b.vx *= -1;
+    // Face the player so the attack telegraph feels deliberate.
+    b.attackTimer--;
+    if (b.attackTimer <= 0) {
+      b.phase = 'telegraph';
+      b.phaseTimer = 50; // charge-up telegraph before a volley
+      // 25% of the time, commit to a slam dash instead of a volley (if off cooldown).
+      if (b.slamCooldown <= 0 && Math.random() < 0.33) {
+        b.pendingSlam = true;
+      } else {
+        b.pendingSlam = false;
+      }
+    }
+  } else if (b.phase === 'telegraph') {
+    // Brief pause while the core glows; no movement.
+    if (b.phaseTimer <= 0) {
+      if (b.pendingSlam) {
+        b.phase = 'slam';
+        b.phaseTimer = 60;
+        b.slamDir = player.x < b.x ? -1 : 1;
+        b.slamCooldown = 480;
+      } else {
+        fireBossRocket(b);
+        b.phase = 'patrol';
+        b.attackTimer = 180 + Math.floor(Math.random() * 80);
+      }
+    }
+  } else if (b.phase === 'slam') {
+    // Charge toward the player's horizontal position for a short window.
+    b.x += b.slamDir * 4.2;
+    if (b.x < b.min) b.x = b.min;
+    if (b.x > b.max) b.x = b.max;
+    if (b.phaseTimer <= 0) {
+      b.phase = 'patrol';
+      b.attackTimer = 180 + Math.floor(Math.random() * 60);
+      // Recoil: flip patrol direction.
+      b.vx = b.slamDir < 0 ? 1.1 : -1.1;
+    }
+  }
+}
+
+// Launch a single homing rocket from the boss that tracks the player for ~2s
+// then self-destructs in a bright explosion (damaging if the hero is in radius).
+function fireBossRocket(b) {
+  const originX = b.x;
+  const originY = b.y - 70; // roughly where the core sits
+  const dx = (player.x + player.w / 2) - originX;
+  const dy = (player.y + player.h / 2) - originY;
+  const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+  // Slow, menacing cruise speed - gives the player time to react, juke behind
+  // shield platforms, or smash the rocket with a guitar swing.
+  const speed = 2.1;
+  bossProjectiles.push({
+    type: 'rocket',
+    x: originX,
+    y: originY,
+    vx: (dx / dist) * speed,
+    vy: (dy / dist) * speed,
+    speed,
+    life: 180,       // 3s of homing at 60fps (longer flight since slower)
+    maxLife: 180,
+    hp: 1,           // one clean guitar hit detonates it
+    homing: true,
+    turnRate: 0.055, // radians per frame - tracks but dodgeable
+    // Self-destruct animation state
+    exploding: false,
+    explodeTimer: 0,
+    explodeMaxTimer: 22,
+    explodeRadius: 58,
+    didExplodeDamage: false,
+    angle: Math.atan2(dy, dx), // facing direction for nose/flame rendering
+  });
+  attackSound();
+}
+
+function updateBossProjectiles() {
+  if (bossProjectiles.length === 0) return;
+  for (let i = bossProjectiles.length - 1; i >= 0; i--) {
+    const p = bossProjectiles[i];
+
+    // Explosion phase: hold in place, fade, damage once, then remove.
+    if (p.exploding) {
+      p.explodeTimer--;
+      if (!p.didExplodeDamage && !player.invincible) {
+        const pcx = player.x + player.w / 2;
+        const pcy = player.y + player.h / 2;
+        const ddx = pcx - p.x;
+        const ddy = pcy - p.y;
+        if (ddx * ddx + ddy * ddy <= p.explodeRadius * p.explodeRadius) {
+          lives--;
+          if (lives <= 0) {
+            gameState = 'gameover';
+            levelDeathCount++;
+            playerDeathSound();
+          } else {
+            player.invincible = true;
+            player.invincibleTimer = 120;
+          }
+          hurtSound();
+        }
+        p.didExplodeDamage = true;
+      }
+      if (p.explodeTimer <= 0) bossProjectiles.splice(i, 1);
+      continue;
+    }
+
+    // Homing: rotate velocity vector toward the player, capped by turnRate.
+    if (p.homing) {
+      const tx = player.x + player.w / 2;
+      const ty = player.y + player.h / 2;
+      const dx = tx - p.x;
+      const dy = ty - p.y;
+      const targetAngle = Math.atan2(dy, dx);
+      const currentAngle = Math.atan2(p.vy, p.vx);
+      let diff = targetAngle - currentAngle;
+      // Normalize to [-PI, PI] so we always turn the shorter way.
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      const turn = Math.max(-p.turnRate, Math.min(p.turnRate, diff));
+      const newAngle = currentAngle + turn;
+      p.vx = Math.cos(newAngle) * p.speed;
+      p.vy = Math.sin(newAngle) * p.speed;
+      p.angle = newAngle;
+    }
+
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+
+    // Direct hit on the player -> trigger explosion immediately.
+    const pr = { x: p.x - 8, y: p.y - 8, w: 16, h: 16 };
+    if (!player.invincible && rects(player, pr)) {
+      p.exploding = true;
+      p.explodeTimer = p.explodeMaxTimer;
+      continue;
+    }
+
+    // Red shield platforms block rockets - detonate on contact.
+    let shieldHit = false;
+    for (const plat of platforms) {
+      if (!plat.shield) continue;
+      if (rects(pr, plat)) { shieldHit = true; break; }
+    }
+    if (shieldHit) {
+      p.exploding = true;
+      p.explodeTimer = p.explodeMaxTimer;
+      continue;
+    }
+
+    // Lifetime expired OR hit the ground/ceiling -> self-destruct.
+    if (p.life <= 0 || p.y > 444 || p.y < -8 || p.x < -24 || p.x > GAME_W + 24) {
+      p.exploding = true;
+      p.explodeTimer = p.explodeMaxTimer;
+      // Clamp the detonation point to the visible arena so the blast is visible.
+      p.y = Math.max(10, Math.min(444, p.y));
+      p.x = Math.max(10, Math.min(GAME_W - 10, p.x));
+      p.vx = 0;
+      p.vy = 0;
+      continue;
+    }
+  }
 }
 
 // ---- Player ----
@@ -1046,7 +1590,18 @@ const player = {
   guitarType: 0,
   attacking: false,
   attackTimer: 0,
-  attackCooldown: 0
+  attackCooldown: 0,
+  performing: false,
+  // --- Smooth-movement state ---
+  coyoteTimer: 0,        // frames of "grace" after walking off a ledge
+  jumpBufferTimer: 0,    // frames the jump press stays queued before landing
+  jumpHeld: false,       // edge-detection for jump button
+  // --- Distortion pedal ---
+  pedalCharges: 0,       // number of AoE pedal uses available
+  pedalActive: false,    // true while the stomp animation is playing
+  pedalTimer: 0,         // countdown of the active animation
+  pedalCooldown: 0,      // prevents spamming even when charges are available
+  pedalKeyHeld: false,   // edge detection for the activation key
 };
 
 function selectedAlias() {
@@ -1276,6 +1831,9 @@ function resetPlayer() {
   player.attacking = false;
   player.attackTimer = 0;
   player.attackCooldown = 0;
+  player.coyoteTimer = 0;
+  player.jumpBufferTimer = 0;
+  player.jumpHeld = false;
 }
 
 // ---- Camera ----
@@ -1288,8 +1846,18 @@ function updateCamera() {
 // ---- Physics ----
 const GRAVITY = 0.5;
 const JUMP_FORCE = -12;
-const SPEED = 2.5;
+const SPEED = 2.8;           // max horizontal speed (slightly higher to keep pace lively)
 const MAX_FALL = 10;
+// Smooth-movement tuning - acceleration-based horizontal control instead of
+// snapping instantly to full speed. Ground is grippier; air control is looser
+// so you can still course-correct mid-jump but not as sharply.
+const ACCEL_GROUND   = 0.42;
+const ACCEL_AIR      = 0.26;
+const FRICTION_GROUND = 0.80;
+const FRICTION_AIR    = 0.95;
+const COYOTE_FRAMES   = 6;   // can still jump up to 6 frames after leaving a ledge
+const JUMP_BUFFER_FRAMES = 6; // pressing jump up to 6 frames before landing still jumps
+const JUMP_CUT_GRAVITY = 0.55; // multiplier applied to rising vy when jump is released
 
 function rects(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -1332,29 +1900,99 @@ function update() {
   // Attack cooldown
   if (player.attackCooldown > 0) player.attackCooldown--;
 
-  // Attack input (keyboard or gamepad)
-  if ((keys['KeyE'] || keys['KeyJ'] || keys['gpAttack']) && !player.attacking && player.attackCooldown === 0 && player.hasGuitar) {
-    player.attacking = true;
-    player.attackTimer = 15;
-    player.attackCooldown = 30;
-    attackSound();
-  }
+  if (player.performing) {
+    // Outro performance: ignore player input, auto-walk to center stage, then
+    // shred on guitar in a continuous loop. No jumping, no directional control.
+    const center = GAME_W / 2 - player.w / 2;
+    const dx = center - player.x;
+    if (Math.abs(dx) > 3) {
+      player.vx = Math.sign(dx) * 2.4;
+      player.facing = player.vx > 0 ? 1 : -1;
+    } else {
+      player.x = center;
+      player.vx = 0;
+      player.facing = 1;
+      // Keep swinging the guitar in a loop to sell the performance.
+      if (!player.attacking && player.attackCooldown === 0 && player.hasGuitar) {
+        player.attacking = true;
+        player.attackTimer = 15;
+        player.attackCooldown = 8; // faster than normal - this is a solo
+      }
+    }
+    if (player.attacking) {
+      player.attackTimer--;
+      if (player.attackTimer <= 0) player.attacking = false;
+    }
+  } else {
+    // Attack input (keyboard or gamepad)
+    if ((keys['KeyE'] || keys['KeyJ'] || keys['gpAttack']) && !player.attacking && player.attackCooldown === 0 && player.hasGuitar) {
+      player.attacking = true;
+      player.attackTimer = 15;
+      player.attackCooldown = 30;
+      attackSound();
+    }
 
-  // Attack animation
-  if (player.attacking) {
-    player.attackTimer--;
-    if (player.attackTimer <= 0) player.attacking = false;
-  }
+    // Attack animation
+    if (player.attacking) {
+      player.attackTimer--;
+      if (player.attackTimer <= 0) player.attacking = false;
+    }
 
-  // Input (keyboard or gamepad)
-  if (keys['ArrowLeft'] || keys['KeyA'] || keys['gpLeft']) { player.vx = -SPEED; player.facing = -1; }
-  else if (keys['ArrowRight'] || keys['KeyD'] || keys['gpRight']) { player.vx = SPEED; player.facing = 1; }
-  else player.vx *= 0.8;
+    // --- Smooth horizontal control ---
+    // Refresh coyote time while on ground, decay it once airborne.
+    if (player.onGround) player.coyoteTimer = COYOTE_FRAMES;
+    else if (player.coyoteTimer > 0) player.coyoteTimer--;
+    if (player.jumpBufferTimer > 0) player.jumpBufferTimer--;
 
-  if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW'] || keys['gpJump'] || keys['gpUp']) && player.onGround) {
-    player.vy = JUMP_FORCE;
-    player.onGround = false;
-    jumpSound();
+    const left  = keys['ArrowLeft']  || keys['KeyA'] || keys['gpLeft'];
+    const right = keys['ArrowRight'] || keys['KeyD'] || keys['gpRight'];
+    const accel    = player.onGround ? ACCEL_GROUND    : ACCEL_AIR;
+    const friction = player.onGround ? FRICTION_GROUND : FRICTION_AIR;
+
+    if (left && !right) {
+      player.vx = Math.max(player.vx - accel, -SPEED);
+      player.facing = -1;
+    } else if (right && !left) {
+      player.vx = Math.min(player.vx + accel, SPEED);
+      player.facing = 1;
+    } else {
+      player.vx *= friction;
+      if (Math.abs(player.vx) < 0.05) player.vx = 0;
+    }
+
+    // --- Jump with buffer + coyote time + variable height ---
+    const jumpPressed = keys['Space'] || keys['ArrowUp'] || keys['KeyW'] || keys['gpJump'] || keys['gpUp'];
+    // Rising edge -> buffer the jump press.
+    if (jumpPressed && !player.jumpHeld) player.jumpBufferTimer = JUMP_BUFFER_FRAMES;
+    // Consume a buffered jump while we still have ground or coyote grace.
+    if (player.jumpBufferTimer > 0 && player.coyoteTimer > 0) {
+      player.vy = JUMP_FORCE;
+      player.onGround = false;
+      player.coyoteTimer = 0;
+      player.jumpBufferTimer = 0;
+      jumpSound();
+    }
+    // Variable jump height: releasing jump while still rising cuts the arc.
+    if (!jumpPressed && player.jumpHeld && player.vy < 0) {
+      player.vy *= JUMP_CUT_GRAVITY;
+    }
+    player.jumpHeld = jumpPressed;
+
+    // --- Distortion pedal activation (F key) ---
+    // Rising-edge only so one tap = one stomp. Requires a charge AND that the
+    // lockout has expired. Triggering starts the stomp animation and damages
+    // every enemy inside PEDAL_RADIUS around the player on the frame of impact.
+    if (player.pedalCooldown > 0) player.pedalCooldown--;
+    if (player.pedalActive) {
+      player.pedalTimer--;
+      if (player.pedalTimer <= 0) player.pedalActive = false;
+    }
+    const pedalPressed = keys['KeyF'] || keys['gpPedal'];
+    if (pedalPressed && !player.pedalKeyHeld &&
+        player.pedalCharges > 0 && player.pedalCooldown <= 0 && !player.pedalActive) {
+      triggerDistortionPedal();
+    }
+    player.pedalKeyHeld = pedalPressed;
   }
 
   // Physics
@@ -1398,6 +2036,7 @@ function update() {
   for (const c of beerCans) {
     if (!c.collected && rects(player, { x: c.x - 12, y: c.y - 12, w: 24, h: 24 })) {
       c.collected = true;
+      beerCollected++;
       if (c.golden) {
         if (lives < 3) {
           // Missing hearts -> restore one. No score bonus.
@@ -1414,13 +2053,43 @@ function update() {
     }
   }
 
+  // --- High-altitude reward pickups ---
+  // Walking through the glowing reward on its high ledge grants either a heart
+  // (capped at MAX_LIVES) or a distortion-pedal charge (capped at MAX_PEDAL_CHARGES).
+  for (const r of rewardPickups) {
+    if (r.collected) continue;
+    r.bobTimer += 0.12;
+    const pickRect = { x: r.x - 14, y: r.y - 14, w: 28, h: 28 };
+    if (rects(player, pickRect)) {
+      r.collected = true;
+      if (r.type === 'heart') {
+        if (lives < MAX_LIVES) lives++;
+        else score += 50;
+        winSound();
+      } else if (r.type === 'pedal') {
+        if (player.pedalCharges < MAX_PEDAL_CHARGES) player.pedalCharges++;
+        else score += 50;
+        buySound();
+      }
+    }
+  }
+
+  // --- Pedal effects (shockwaves / lingering visuals) ---
+  for (let i = pedalEffects.length - 1; i >= 0; i--) {
+    const fx = pedalEffects[i];
+    fx.age++;
+    if (fx.age >= fx.life) pedalEffects.splice(i, 1);
+  }
+
   // Enemy update & collision
   for (const e of enemies) {
     if (!e.alive) continue;
 
-    // Dashers: spawn just off the visible screen edge and sprint to the opposite
-    // off-screen edge. They never appear or vanish within the visible area.
-    if (e.type === 'dasher') {
+    if (e.type === 'boss') {
+      updateBossAI(e);
+    } else if (e.type === 'dasher') {
+      // Dashers: spawn just off the visible screen edge and sprint to the opposite
+      // off-screen edge. They never appear or vanish within the visible area.
       if (!e.active) {
         e.respawn--;
         if (e.respawn <= 0) {
@@ -1439,10 +2108,61 @@ function update() {
           e.respawn = 180 + Math.floor(Math.random() * 180);
         }
       }
+    } else if (e.verticalStops) {
+      // Enemies with a vertical-patrol path (currently big-bots): horizontal patrol
+      // within the current stop's [min, max], then periodic parabolic jumps to the
+      // next stop at a different platform height.
+      if (e.jumpPhase === 'jumping') {
+        e.jumpProgress += 1 / 45; // ~0.75s jump
+        if (e.jumpProgress >= 1) {
+          e.jumpProgress = 1;
+          e.x = e.jumpToX;
+          e.y = e.jumpToY;
+          e.jumpPhase = 'idle';
+          e.jumpTimer = 180 + Math.floor(Math.random() * 180);
+          // Adopt the new stop's patrol range.
+          const stop = e.verticalStops[e.currentStop];
+          e.min = stop.min;
+          e.max = stop.max;
+          // Clamp inside the new range in case we landed just past an edge.
+          if (e.x < e.min) e.x = e.min;
+          if (e.x > e.max) e.x = e.max;
+        } else {
+          const t = e.jumpProgress;
+          // Parabolic arc with a visible hop height.
+          const arcH = 70;
+          const arc = -arcH * 4 * t * (1 - t);
+          e.x = e.jumpFromX + (e.jumpToX - e.jumpFromX) * t;
+          e.y = e.jumpFromY + (e.jumpToY - e.jumpFromY) * t + arc;
+        }
+      } else {
+        // Normal horizontal patrol
+        e.x += e.vx;
+        if (e.x <= e.min || e.x >= e.max) e.vx *= -1;
+        e.jumpTimer--;
+        if (e.jumpTimer <= 0) {
+          // Pick a different stop at random (at least 2 stops guaranteed).
+          let nextStop = e.currentStop;
+          while (nextStop === e.currentStop) {
+            nextStop = Math.floor(Math.random() * e.verticalStops.length);
+          }
+          const target = e.verticalStops[nextStop];
+          // Jump to a random X inside the target's range.
+          const targetX = target.min + Math.random() * (target.max - target.min);
+          e.jumpFromX = e.x;
+          e.jumpFromY = e.y;
+          e.jumpToX = targetX;
+          e.jumpToY = target.y;
+          e.jumpProgress = 0;
+          e.jumpPhase = 'jumping';
+          e.currentStop = nextStop;
+        }
+      }
     } else {
       e.x += e.vx;
       if (e.x <= e.min || e.x >= e.max) e.vx *= -1;
-      if (e.type === 'flyer') {
+      // Flyers and drones bob vertically between minY and maxY.
+      if (e.type === 'flyer' || e.type === 'drone') {
         e.y += e.vy;
         if (e.y <= e.minY || e.y >= e.maxY) e.vy *= -1;
       }
@@ -1455,6 +2175,10 @@ function update() {
     const isBrute = e.type === 'brute';
     const isDasher = e.type === 'dasher';
     const isRat = e.type === 'rat';
+    const isDrone = e.type === 'drone';
+    const isSoldier = e.type === 'soldier';
+    const isBigbot = e.type === 'bigbot';
+    const isBoss = e.type === 'boss';
 
     // Dashers that are off-screen do not collide or get drawn.
     if (isDasher && !e.active) continue;
@@ -1464,6 +2188,10 @@ function update() {
     if (isBrute) { hbW = 40; hbH = 40; }
     else if (isRat) { hbW = 26; hbH = 18; }
     else if (isDasher) { hbW = 56; hbH = 32; }
+    else if (isDrone) { hbW = 34; hbH = 26; }
+    else if (isSoldier) { hbW = 30; hbH = 46; }
+    else if (isBigbot) { hbW = 52; hbH = 60; }
+    else if (isBoss) { hbW = 110; hbH = 130; }
     const enemyRect = { x: e.x - hbW / 2, y: e.y - hbH, w: hbW, h: hbH };
 
     // Guitar attack - AABB overlap between a tight swing hitbox and the enemy hitbox.
@@ -1480,8 +2208,20 @@ function update() {
         e.hitFlash = 10;
         if (e.hp <= 0) {
           e.alive = false;
-          score += isBrute ? 120 : 50;
+          enemiesKilled++;
+          // Score rewards scale roughly with enemy HP / threat.
+          if (isBoss) score += 1000;
+          else if (isBigbot) score += 200;
+          else if (isBrute) score += 120;
+          else if (isSoldier) score += 90;
+          else if (isDrone) score += 60;
+          else score += 50;
           guitarKillSound();
+          // Boss defeated: start the victory outro sequence.
+          if (isBoss) {
+            bossOutroTimer = 120;
+            bossProjectiles.length = 0;
+          }
         } else {
           hurtSound();
         }
@@ -1491,12 +2231,13 @@ function update() {
 
     if (rects(player, enemyRect)) {
       const prevBottom = player.y + player.h - player.vy;
-      // Brutes are spiky, dashers are armored carts -> cannot be stomped.
-      const canStomp = !isBrute && !isDasher;
+      // Brutes, dashers, big-bots and the final boss cannot be stomped.
+      const canStomp = !isBrute && !isDasher && !isBigbot && !isBoss;
       if (canStomp && prevBottom < e.y && player.vy > 0) {
         e.alive = false;
+        enemiesKilled++;
         player.vy = -8;
-        score += 50;
+        score += isSoldier ? 90 : (isDrone ? 60 : 50);
         killSound();
       } else if (!player.invincible) {
         lives--;
@@ -1508,13 +2249,35 @@ function update() {
         else {
           player.invincible = true;
           player.invincibleTimer = 120;
-          // Bounce player away from brute so they're not stuck in damage loop.
-          if (isBrute) {
-            player.vy = -6;
-            player.vx = player.x < e.x ? -4 : 4;
+          // Bounce player away from heavy enemies so they're not stuck in damage loop.
+          if (isBrute || isBigbot || isBoss) {
+            player.vy = -7;
+            player.vx = player.x < e.x ? -5 : 5;
           }
         }
         hurtSound();
+      }
+    }
+  }
+
+  // Guitar swing can smash boss rockets mid-flight. A clean hit detonates the
+  // rocket right where it is (far from the player) - a safe way to neutralize it.
+  if (player.attacking && player.attackTimer > 2 && bossProjectiles.length > 0) {
+    const progress = (15 - player.attackTimer) / 15;
+    const gx = player.x + (player.facing > 0 ? 58 : -32);
+    const gy = player.y - 18 + progress * 38;
+    const guitarRect = { x: gx - 18, y: gy - 8, w: 36, h: 54 };
+    for (const p of bossProjectiles) {
+      if (p.exploding) continue;
+      const pr = { x: p.x - 10, y: p.y - 10, w: 20, h: 20 };
+      if (rects(guitarRect, pr)) {
+        p.exploding = true;
+        p.explodeTimer = p.explodeMaxTimer;
+        // Slightly smaller blast when swatted away, and no damage to the player
+        // (they just swung a guitar into it - that's their reward).
+        p.explodeRadius = 30;
+        p.didExplodeDamage = true;
+        guitarKillSound();
       }
     }
   }
@@ -1559,18 +2322,64 @@ function update() {
     }
   }
 
-  // Win - advance to next level after the shop.
-  if (player.x + player.w > player.goalX) {
-    totalBeer += score;
-    winSound();
-    lastCompletedLevel = currentLevel;
-    currentLevel = (currentLevel % TOTAL_LEVELS) + 1;
-    levelDeathCount = 0; // Fresh attempts on the new level.
-    gameState = 'shop';
-    shopCol = 0;
-    shopRow = 0;
-    shopFocus = 'grid';
-    shopFooterSel = 1;
+  // Boss projectiles (active only during the boss fight).
+  updateBossProjectiles();
+
+  // Boss defeated - wait for the short death animation to elapse, then kick off
+  // the "performance" phase (hero walks to center stage and shreds on guitar)
+  // before the VICTORY screen with stats appears.
+  if (bossActive && bossOutroTimer > 0) {
+    bossOutroTimer--;
+    if (bossOutroTimer <= 0) {
+      totalBeer += score;
+      bossActive = false;
+      // Persist the boss victory so the DIY Punk Guitar unlocks in the shop
+      // on any subsequent playthrough (including after a page reload).
+      markBossBeaten();
+      // Start the celebratory performance phase - heavy metal outro.
+      performanceActive = true;
+      performanceTimer = PERFORMANCE_DURATION;
+      player.performing = true;
+      runEndMs = Date.now();
+      // Swap from boss theme to victory metal theme.
+      stopBackgroundMusic();
+      startBackgroundMusic('victory');
+    }
+  }
+
+  // Performance phase: hero is auto-walking to center and playing guitar.
+  // Count down, then hand off to the VICTORY screen.
+  if (performanceActive) {
+    performanceTimer--;
+    if (performanceTimer <= 0) {
+      performanceActive = false;
+      player.performing = false;
+      winSound();
+      gameState = 'victory';
+      stopBackgroundMusic();
+    }
+  }
+
+  // Win flag - advance to the next level after the shop, OR enter the boss arena
+  // at the end of level 5 (instead of the usual shop transition).
+  if (!bossActive && player.x + player.w > player.goalX) {
+    if (currentLevel === 5) {
+      // End of the neon city run: step into the boss arena.
+      lastCompletedLevel = currentLevel;
+      winSound();
+      enterBossArena();
+    } else {
+      totalBeer += score;
+      winSound();
+      lastCompletedLevel = currentLevel;
+      currentLevel = (currentLevel % TOTAL_LEVELS) + 1;
+      levelDeathCount = 0; // Fresh attempts on the new level.
+      gameState = 'shop';
+      shopCol = 0;
+      shopRow = 0;
+      shopFocus = 'grid';
+      shopFooterSel = 1;
+    }
   }
 
   // Animation
@@ -1595,16 +2404,30 @@ function handleGameStateTransitions() {
   if (keys['Space_transition_held'] || keys['Enter_transition_held']) {
     if (gameState === 'gameover') {
       audioCtx.resume();
-      // On non-first levels the player gets up to MAX_DEATHS_PER_LEVEL tries before
-      // being kicked back to level 1. Level 1 always restarts from scratch.
-      if (currentLevel > 1 && levelDeathCount < MAX_DEATHS_PER_LEVEL) {
-        // Respawn on the same level; keep the death counter.
+      if (bossActive) {
+        // Dying in the boss arena: retry the fight directly (unlimited tries).
+        lives = 3;
+        score = 0;
+        resetPlayer();
+        enterBossArena();
+        gameState = 'playing';
+      } else if (currentLevel > 1 && levelDeathCount < MAX_DEATHS_PER_LEVEL) {
+        // On non-first levels the player gets up to MAX_DEATHS_PER_LEVEL tries
+        // before being kicked back to level 1. Level 1 always restarts fresh.
         startGame();
       } else {
         currentLevel = 1;
         levelDeathCount = 0;
         startGame();
       }
+    } else if (gameState === 'victory') {
+      // Back to the main menu after the final fanfare.
+      audioCtx.resume();
+      currentLevel = 1;
+      levelDeathCount = 0;
+      lastCompletedLevel = 0;
+      bossActive = false;
+      gameState = 'start';
     }
     keys['Space_transition_held'] = false;
     keys['Enter_transition_held'] = false;
@@ -2500,6 +3323,40 @@ function drawPlatform(p) {
     ctx.fillRect(sx, p.y, p.w, 8);
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(sx, p.y + p.h - 4, p.w, 4);
+  } else if (p.shield) {
+    // Rocket-blocking shield platform - glowing red hazard look with a pulsing
+    // energy strip along the top so the player reads it as "cover from rockets".
+    const pulse = 0.65 + 0.35 * Math.sin(Date.now() * 0.008);
+    // Soft outer glow
+    ctx.save();
+    ctx.shadowColor = '#ff2a3a';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#6a0c12';
+    ctx.fillRect(sx, p.y, p.w, p.h);
+    ctx.restore();
+    // Inner plating
+    ctx.fillStyle = '#a8121c';
+    ctx.fillRect(sx + 2, p.y + 2, p.w - 4, p.h - 4);
+    // Hot top surface - where rockets detonate
+    ctx.fillStyle = `rgba(255, ${Math.floor(60 + pulse * 90)}, ${Math.floor(60 + pulse * 30)}, 1)`;
+    ctx.fillRect(sx, p.y, p.w, 4);
+    // Bright highlight line
+    ctx.fillStyle = 'rgba(255, 230, 180, 0.75)';
+    ctx.fillRect(sx + 2, p.y + 1, p.w - 4, 1);
+    // Corner rivets
+    ctx.fillStyle = '#2a0408';
+    ctx.fillRect(sx + 2,         p.y + p.h - 4, 2, 2);
+    ctx.fillRect(sx + p.w - 4,   p.y + p.h - 4, 2, 2);
+    // Animated energy chevrons across the top strip
+    const chevSpan = 14;
+    const t = (Date.now() * 0.12) % chevSpan;
+    ctx.fillStyle = `rgba(255, 220, 120, ${0.4 + pulse * 0.4})`;
+    for (let cx = sx - chevSpan + t; cx < sx + p.w; cx += chevSpan) {
+      if (cx + 4 < sx || cx > sx + p.w) continue;
+      const x0 = Math.max(sx, cx);
+      const x1 = Math.min(sx + p.w, cx + 4);
+      if (x1 > x0) ctx.fillRect(x0, p.y + 5, x1 - x0, 2);
+    }
   } else {
     ctx.fillStyle = '#4a3a2a';
     ctx.fillRect(sx, p.y, p.w, p.h);
@@ -2599,6 +3456,22 @@ function drawEnemy(e) {
   }
   if (e.type === 'dasher') {
     drawDasher(sx, e.y, e);
+    return;
+  }
+  if (e.type === 'drone') {
+    drawDrone(sx, e.y, e);
+    return;
+  }
+  if (e.type === 'soldier') {
+    drawCyberSoldier(sx, e.y, e);
+    return;
+  }
+  if (e.type === 'bigbot') {
+    drawBigBot(sx, e.y, e);
+    return;
+  }
+  if (e.type === 'boss') {
+    drawBoss(sx, e.y, e);
     return;
   }
 
@@ -2899,6 +3772,509 @@ function drawDasher(sx, y, e) {
   ctx.restore();
 }
 
+// Small HP pip row shared by the new cyber-city enemies.
+function drawEnemyHpBar(cx, topY, w, hp, maxHp) {
+  if (hp >= maxHp) return;
+  const h = 3;
+  const y = topY - 8;
+  const x = cx - w / 2;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = '#3a0a12';
+  ctx.fillRect(x, y, w, h);
+  const ratio = Math.max(0, hp / maxHp);
+  ctx.fillStyle = ratio > 0.5 ? '#39ff14' : (ratio > 0.25 ? '#ffcc00' : '#ff4040');
+  ctx.fillRect(x, y, Math.round(w * ratio), h);
+}
+
+function drawDrone(sx, y, e) {
+  const flash = e.hitFlash > 0;
+  const now = Date.now() * 0.01;
+  ctx.save();
+
+  // Hovering shadow below (based on vertical position)
+  const groundY = 448;
+  const shadowAlpha = Math.max(0.05, 0.35 - (groundY - y) / 1200);
+  const shadowW = 18 + (groundY - y) / 40;
+  ctx.fillStyle = `rgba(0, 220, 255, ${shadowAlpha})`;
+  ctx.beginPath();
+  ctx.ellipse(sx, groundY - 2, shadowW, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Rotor blur (twin rotors top-left / top-right)
+  ctx.fillStyle = 'rgba(180, 240, 255, 0.5)';
+  const rotorW = 14 + Math.sin(now * 3) * 2;
+  ctx.fillRect(sx - 22, y - 22, rotorW, 2);
+  ctx.fillRect(sx + 22 - rotorW, y - 22, rotorW, 2);
+
+  // Arms
+  ctx.fillStyle = '#2a2a3a';
+  ctx.fillRect(sx - 20, y - 20, 14, 2);
+  ctx.fillRect(sx + 6,  y - 20, 14, 2);
+
+  // Main chassis
+  const bodyColor = flash ? '#ffffff' : '#1a2838';
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(sx - 12, y - 18, 24, 14);
+  // Lower half
+  ctx.fillStyle = flash ? '#ffffff' : '#0f1a26';
+  ctx.fillRect(sx - 10, y - 6, 20, 4);
+
+  // Neon cyan trim
+  ctx.fillStyle = flash ? '#ffffff' : '#00f0ff';
+  ctx.fillRect(sx - 12, y - 8, 24, 1);
+  ctx.fillRect(sx - 12, y - 19, 24, 1);
+
+  // Camera eye (pulsing)
+  const pulse = 0.7 + 0.3 * Math.sin(now * 2);
+  ctx.fillStyle = flash ? '#ffffff' : `rgba(255, 40, 120, ${pulse})`;
+  ctx.fillRect(sx - 4, y - 15, 8, 5);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(sx - 2, y - 14, 2, 2);
+
+  // Antenna with blinking red tip
+  ctx.fillStyle = '#2a2a3a';
+  ctx.fillRect(sx - 1, y - 26, 2, 8);
+  ctx.fillStyle = (Math.floor(now * 3) % 2) ? '#ff3333' : '#660000';
+  ctx.fillRect(sx - 2, y - 28, 4, 3);
+
+  // Rotor hubs
+  ctx.fillStyle = '#555';
+  ctx.fillRect(sx - 16, y - 23, 4, 3);
+  ctx.fillRect(sx + 12, y - 23, 4, 3);
+
+  ctx.restore();
+  drawEnemyHpBar(sx, y - 26, 28, e.hp, e.maxHp);
+}
+
+function drawCyberSoldier(sx, y, e) {
+  const flash = e.hitFlash > 0;
+  const facing = e.vx >= 0 ? 1 : -1;
+  const walkPhase = Math.floor(Date.now() / 120) % 4;
+  const walkOffset = walkPhase === 1 ? -1 : walkPhase === 3 ? 1 : 0;
+  ctx.save();
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(sx, y + 2, 16, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Legs
+  ctx.fillStyle = flash ? '#ffffff' : '#15151c';
+  ctx.fillRect(sx - 8, y - 16 + walkOffset, 6, 16 - walkOffset);
+  ctx.fillRect(sx + 2, y - 16 - walkOffset, 6, 16 + walkOffset);
+  // Boots
+  ctx.fillStyle = flash ? '#ffffff' : '#0a0a10';
+  ctx.fillRect(sx - 9, y - 2, 8, 3);
+  ctx.fillRect(sx + 1, y - 2, 8, 3);
+
+  // Torso armor
+  ctx.fillStyle = flash ? '#ffffff' : '#2b3a5a';
+  ctx.fillRect(sx - 11, y - 34, 22, 20);
+  // Chest light
+  ctx.fillStyle = flash ? '#ffffff' : '#ff3370';
+  ctx.fillRect(sx - 3, y - 30, 6, 3);
+  // Armor trim
+  ctx.fillStyle = flash ? '#ffffff' : '#ff3370';
+  ctx.fillRect(sx - 11, y - 34, 22, 1);
+  ctx.fillRect(sx - 11, y - 16, 22, 1);
+
+  // Arms + rifle (pointing in facing direction)
+  ctx.fillStyle = flash ? '#ffffff' : '#1f2a42';
+  ctx.fillRect(sx - 14, y - 30, 4, 14);
+  ctx.fillRect(sx + 10, y - 30, 4, 14);
+  // Rifle barrel
+  ctx.fillStyle = flash ? '#ffffff' : '#444';
+  const rx = facing > 0 ? sx + 14 : sx - 24;
+  ctx.fillRect(rx, y - 24, 10, 3);
+  ctx.fillStyle = '#ff3370';
+  ctx.fillRect(rx + (facing > 0 ? 8 : 0), y - 24, 2, 3);
+
+  // Helmet
+  ctx.fillStyle = flash ? '#ffffff' : '#1a2236';
+  ctx.fillRect(sx - 10, y - 46, 20, 12);
+  ctx.fillRect(sx - 12, y - 44, 24, 8);
+  // Visor - cyan glow
+  ctx.fillStyle = flash ? '#ffffff' : '#00f0ff';
+  ctx.fillRect(sx - 10, y - 40, 20, 3);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(sx + (facing > 0 ? 4 : -6), y - 39, 2, 1);
+
+  ctx.restore();
+  drawEnemyHpBar(sx, y - 50, 30, e.hp, e.maxHp);
+}
+
+function drawBigBot(sx, y, e) {
+  const flash = e.hitFlash > 0;
+  const facing = e.vx >= 0 ? 1 : -1;
+  const stomp = Math.floor(Date.now() / 220) % 2;
+  ctx.save();
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(sx, y + 3, 26, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Legs (wide hydraulic pistons)
+  ctx.fillStyle = flash ? '#ffffff' : '#161a22';
+  ctx.fillRect(sx - 14, y - 18 + (stomp ? -1 : 0), 10, 18);
+  ctx.fillRect(sx + 4,  y - 18 + (stomp ? 0 : -1), 10, 18);
+  // Knee pistons
+  ctx.fillStyle = flash ? '#ffffff' : '#3a4050';
+  ctx.fillRect(sx - 12, y - 14, 6, 3);
+  ctx.fillRect(sx + 6,  y - 14, 6, 3);
+  // Feet
+  ctx.fillStyle = flash ? '#ffffff' : '#0a0c14';
+  ctx.fillRect(sx - 16, y - 2, 14, 4);
+  ctx.fillRect(sx + 2,  y - 2, 14, 4);
+
+  // Torso - barrel-shaped chassis
+  ctx.fillStyle = flash ? '#ffffff' : '#4a2a5a';
+  ctx.fillRect(sx - 22, y - 48, 44, 30);
+  ctx.fillStyle = flash ? '#ffffff' : '#6a3a7a';
+  ctx.fillRect(sx - 20, y - 46, 40, 4);
+  // Core reactor glow
+  const corePulse = 0.6 + 0.4 * Math.sin(Date.now() * 0.006);
+  ctx.fillStyle = flash ? '#ffffff' : `rgba(255, 79, 216, ${corePulse})`;
+  ctx.fillRect(sx - 6, y - 36, 12, 10);
+  ctx.fillStyle = '#ffdcff';
+  ctx.fillRect(sx - 3, y - 34, 6, 4);
+
+  // Shoulder pauldrons with spikes
+  ctx.fillStyle = flash ? '#ffffff' : '#2a1a38';
+  ctx.fillRect(sx - 28, y - 48, 10, 14);
+  ctx.fillRect(sx + 18, y - 48, 10, 14);
+  // Spike crests
+  ctx.fillStyle = flash ? '#ffffff' : '#888';
+  ctx.fillRect(sx - 26, y - 52, 3, 4);
+  ctx.fillRect(sx - 22, y - 54, 3, 6);
+  ctx.fillRect(sx + 20, y - 54, 3, 6);
+  ctx.fillRect(sx + 24, y - 52, 3, 4);
+
+  // Arms - hanging heavy cannons
+  ctx.fillStyle = flash ? '#ffffff' : '#1f1420';
+  ctx.fillRect(sx - 32, y - 34, 8, 20);
+  ctx.fillRect(sx + 24, y - 34, 8, 20);
+  // Cannon muzzles
+  ctx.fillStyle = flash ? '#ffffff' : '#111';
+  ctx.fillRect(sx - 34, y - 18, 12, 6);
+  ctx.fillRect(sx + 22, y - 18, 12, 6);
+  ctx.fillStyle = '#ff4f00';
+  ctx.fillRect(sx - 32, y - 16, 2, 2);
+  ctx.fillRect(sx + 30, y - 16, 2, 2);
+
+  // Head - compact with single slit eye
+  ctx.fillStyle = flash ? '#ffffff' : '#2b1a38';
+  ctx.fillRect(sx - 10, y - 60, 20, 14);
+  ctx.fillStyle = flash ? '#ffffff' : '#4a2a5a';
+  ctx.fillRect(sx - 12, y - 56, 24, 4);
+  // Eye slit
+  ctx.fillStyle = flash ? '#ffffff' : '#ff0055';
+  ctx.fillRect(sx - 8 + (facing > 0 ? 1 : -1), y - 54, 16, 3);
+  // Antenna
+  ctx.fillStyle = '#888';
+  ctx.fillRect(sx - 1, y - 66, 2, 6);
+  ctx.fillStyle = (Math.floor(Date.now() / 300) % 2) ? '#ff3333' : '#660000';
+  ctx.fillRect(sx - 2, y - 68, 4, 3);
+
+  ctx.restore();
+  drawEnemyHpBar(sx, y - 70, 46, e.hp, e.maxHp);
+}
+
+function drawBoss(sx, y, e) {
+  const flash = e.hitFlash > 0;
+  const telegraph = e.phase === 'telegraph';
+  const slamming = e.phase === 'slam';
+  const facing = player.x < e.x ? -1 : 1;
+  const now = Date.now() * 0.005;
+  const pulse = 0.7 + 0.3 * Math.sin(now * 2);
+  // During the outro the boss sparks/glitches.
+  const dying = bossOutroTimer > 0;
+
+  ctx.save();
+
+  // Heavy ground shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(sx, y + 3, 60, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Legs - twin hydraulic pistons
+  ctx.fillStyle = flash ? '#ffffff' : '#0f0a18';
+  ctx.fillRect(sx - 30, y - 38, 20, 38);
+  ctx.fillRect(sx + 10, y - 38, 20, 38);
+  // Knee hydraulics
+  ctx.fillStyle = flash ? '#ffffff' : '#3a2a4a';
+  ctx.fillRect(sx - 28, y - 32, 16, 4);
+  ctx.fillRect(sx + 12, y - 32, 16, 4);
+  ctx.fillRect(sx - 28, y - 18, 16, 4);
+  ctx.fillRect(sx + 12, y - 18, 16, 4);
+  // Feet pads
+  ctx.fillStyle = flash ? '#ffffff' : '#05030a';
+  ctx.fillRect(sx - 34, y - 4, 26, 6);
+  ctx.fillRect(sx + 8,  y - 4, 26, 6);
+
+  // Torso - massive armored chassis
+  ctx.fillStyle = flash ? '#ffffff' : '#3a1450';
+  ctx.fillRect(sx - 44, y - 96, 88, 60);
+  ctx.fillStyle = flash ? '#ffffff' : '#5a1a78';
+  ctx.fillRect(sx - 42, y - 94, 84, 8); // top highlight
+  // Torso magenta neon seams
+  ctx.fillStyle = flash ? '#ffffff' : '#ff2aa0';
+  ctx.globalAlpha = 0.85;
+  ctx.fillRect(sx - 44, y - 60, 88, 2);
+  ctx.fillRect(sx - 44, y - 38, 88, 2);
+  ctx.globalAlpha = 1;
+
+  // Reactor core - pulsing when telegraphing
+  const coreColor = telegraph ? `rgba(255, 204, 0, ${0.7 + 0.3 * Math.sin(now * 8)})`
+                              : `rgba(255, 80, 210, ${pulse})`;
+  ctx.fillStyle = flash ? '#ffffff' : coreColor;
+  ctx.fillRect(sx - 14, y - 82, 28, 28);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(sx - 8, y - 78, 4, 20);
+  ctx.fillRect(sx + 4, y - 78, 4, 20);
+  // Core frame
+  ctx.strokeStyle = flash ? '#ffffff' : '#ff2aa0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(sx - 14, y - 82, 28, 28);
+  ctx.lineWidth = 1;
+
+  // Shoulder pauldrons with spikes
+  ctx.fillStyle = flash ? '#ffffff' : '#2a0c3a';
+  ctx.fillRect(sx - 58, y - 96, 14, 26);
+  ctx.fillRect(sx + 44, y - 96, 14, 26);
+  ctx.fillStyle = flash ? '#ffffff' : '#ff2aa0';
+  ctx.fillRect(sx - 58, y - 96, 14, 3);
+  ctx.fillRect(sx + 44, y - 96, 14, 3);
+  // Spikes
+  ctx.fillStyle = flash ? '#ffffff' : '#cccccc';
+  for (let i = 0; i < 3; i++) {
+    ctx.fillRect(sx - 56 + i * 4, y - 102 - i * 2, 2, 6 + i * 2);
+    ctx.fillRect(sx + 46 + i * 4, y - 102 - (2 - i) * 2, 2, 6 + (2 - i) * 2);
+  }
+
+  // Arms with cannons
+  ctx.fillStyle = flash ? '#ffffff' : '#1a0c26';
+  ctx.fillRect(sx - 66, y - 72, 12, 30);
+  ctx.fillRect(sx + 54, y - 72, 12, 30);
+  // Elbow joints
+  ctx.fillStyle = flash ? '#ffffff' : '#4a2a5a';
+  ctx.fillRect(sx - 66, y - 62, 12, 4);
+  ctx.fillRect(sx + 54, y - 62, 12, 4);
+  // Cannon barrels (longer during telegraph to sell the windup)
+  const barrelExt = telegraph ? 8 : 0;
+  ctx.fillStyle = flash ? '#ffffff' : '#111';
+  ctx.fillRect(sx - 74 - barrelExt, y - 48, 18 + barrelExt, 10);
+  ctx.fillRect(sx + 56, y - 48, 18 + barrelExt, 10);
+  // Muzzle glow
+  ctx.fillStyle = flash ? '#ffffff' : (telegraph ? '#ffee66' : '#ff2aa0');
+  ctx.fillRect(sx - 76 - barrelExt, y - 46, 3, 6);
+  ctx.fillRect(sx + 72 + barrelExt, y - 46, 3, 6);
+
+  // Head - single-visor skull
+  ctx.fillStyle = flash ? '#ffffff' : '#2a0c3a';
+  ctx.fillRect(sx - 22, y - 124, 44, 28);
+  ctx.fillStyle = flash ? '#ffffff' : '#4a1a58';
+  ctx.fillRect(sx - 24, y - 118, 48, 6);
+  // Visor - glowing slit
+  const visorColor = slamming ? '#ffee66' : (dying ? '#5588ff' : '#ff2aa0');
+  ctx.fillStyle = flash ? '#ffffff' : visorColor;
+  ctx.fillRect(sx - 18, y - 112, 36, 6);
+  // Horn crown
+  ctx.fillStyle = flash ? '#ffffff' : '#cccccc';
+  ctx.fillRect(sx - 16, y - 132, 4, 10);
+  ctx.fillRect(sx - 4,  y - 136, 4, 12);
+  ctx.fillRect(sx + 8,  y - 132, 4, 10);
+  // Antenna with warning light
+  ctx.fillStyle = '#888';
+  ctx.fillRect(sx + 14, y - 140, 2, 8);
+  ctx.fillStyle = (Math.floor(Date.now() / 250) % 2) ? '#ff3333' : '#550000';
+  ctx.fillRect(sx + 12, y - 143, 6, 4);
+
+  // Dying glitch: random spark rectangles
+  if (dying) {
+    for (let i = 0; i < 6; i++) {
+      ctx.fillStyle = Math.random() < 0.5 ? '#ffee66' : '#ff2aa0';
+      ctx.fillRect(sx - 40 + Math.random() * 80, y - 120 + Math.random() * 100, 3, 3);
+    }
+  }
+
+  // Facing-direction indicator: subtle side panel highlight on the tracking side.
+  if (!dying) {
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#ff2aa0';
+    if (facing < 0) ctx.fillRect(sx - 44, y - 94, 4, 56);
+    else ctx.fillRect(sx + 40, y - 94, 4, 56);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+}
+
+function drawBossProjectiles() {
+  if (bossProjectiles.length === 0) return;
+  for (const p of bossProjectiles) {
+    const sx = p.x - camX;
+
+    // --- Explosion phase ---
+    if (p.exploding) {
+      const t = 1 - (p.explodeTimer / p.explodeMaxTimer); // 0 -> 1
+      const r = p.explodeRadius * Math.min(1, t * 1.4);
+      // Outer fiery ring
+      ctx.fillStyle = `rgba(255, 80, 40, ${0.55 * (1 - t)})`;
+      ctx.beginPath();
+      ctx.arc(sx, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      // Middle yellow-orange core
+      ctx.fillStyle = `rgba(255, 220, 80, ${0.75 * (1 - t)})`;
+      ctx.beginPath();
+      ctx.arc(sx, p.y, r * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      // Hot white center
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * (1 - t)})`;
+      ctx.beginPath();
+      ctx.arc(sx, p.y, r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      // Shockwave ring outline
+      ctx.strokeStyle = `rgba(255, 204, 80, ${0.8 * (1 - t)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(sx, p.y, r * 1.05, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      // Debris sparks
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2 + t * 1.2;
+        const dr = r * 0.9;
+        ctx.fillStyle = `rgba(255, 180, 60, ${1 - t})`;
+        ctx.fillRect(sx + Math.cos(a) * dr - 1, p.y + Math.sin(a) * dr - 1, 2, 2);
+      }
+      continue;
+    }
+
+    // --- Rocket in flight ---
+    const ang = p.angle || Math.atan2(p.vy, p.vx);
+    ctx.save();
+    ctx.translate(sx, p.y);
+    ctx.rotate(ang);
+
+    // Exhaust flame behind rocket - flickering orange/yellow plume
+    const flameLen = 14 + Math.sin(Date.now() * 0.05) * 3;
+    ctx.fillStyle = 'rgba(255, 140, 40, 0.75)';
+    ctx.beginPath();
+    ctx.moveTo(-6, -4);
+    ctx.lineTo(-6 - flameLen, 0);
+    ctx.lineTo(-6, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 230, 120, 0.9)';
+    ctx.beginPath();
+    ctx.moveTo(-6, -2);
+    ctx.lineTo(-6 - flameLen * 0.7, 0);
+    ctx.lineTo(-6, 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Rocket body - metallic magenta chassis
+    ctx.fillStyle = '#3a1030';
+    ctx.fillRect(-8, -4, 14, 8);
+    ctx.fillStyle = '#ff2aa0';
+    ctx.fillRect(-8, -4, 14, 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-4, -1, 8, 2);
+    // Nose cone
+    ctx.fillStyle = '#ffee66';
+    ctx.beginPath();
+    ctx.moveTo(6, -4);
+    ctx.lineTo(12, 0);
+    ctx.lineTo(6, 4);
+    ctx.closePath();
+    ctx.fill();
+    // Fins
+    ctx.fillStyle = '#ff2aa0';
+    ctx.fillRect(-8, -6, 3, 2);
+    ctx.fillRect(-8, 4,  3, 2);
+    // Blinking guidance light pulse (faster as lifetime elapses)
+    const pulseRate = 0.012 + (1 - p.life / p.maxLife) * 0.03;
+    const blink = Math.sin(Date.now() * pulseRate * 10) > 0;
+    if (blink) {
+      ctx.fillStyle = '#ff2a2a';
+      ctx.fillRect(-1, -1, 2, 2);
+    }
+
+    ctx.restore();
+
+    // Soft glow halo (draw in world space, not rotated)
+    ctx.fillStyle = 'rgba(255, 80, 200, 0.2)';
+    ctx.beginPath();
+    ctx.arc(sx, p.y, 11, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawBossHPBar() {
+  if (!bossActive || !boss) return;
+  // Positioned just below the HUD strip (y = 0..56) so it is never occluded.
+  const barW = 620;
+  const barH = 22;
+  const panelX = (UI_W - (barW + 24)) / 2;
+  const panelY = 64;
+  const x = panelX + 12;
+  const y = panelY + 22;
+
+  // Panel with neon border
+  ctx.fillStyle = 'rgba(10, 4, 18, 0.92)';
+  ctx.fillRect(panelX, panelY, barW + 24, barH + 34);
+  ctx.strokeStyle = '#ff2aa0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX, panelY, barW + 24, barH + 34);
+  ctx.lineWidth = 1;
+
+  // Label with subtle glow
+  ctx.save();
+  ctx.shadowColor = '#ff2aa0';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = '#ffee66';
+  ctx.font = 'bold 13px Consolas, "Courier New", monospace';
+  ctx.fillText('MEGA-CORP TITAN', x, y - 6);
+  ctx.restore();
+
+  // Bar backdrop
+  ctx.fillStyle = '#200614';
+  ctx.fillRect(x, y, barW, barH);
+  // Fill
+  const ratio = Math.max(0, boss.hp / boss.maxHp);
+  const grad = ctx.createLinearGradient(x, y, x + barW, y);
+  grad.addColorStop(0, '#ff2aa0');
+  grad.addColorStop(0.5, '#ff6ac0');
+  grad.addColorStop(1, '#ffee66');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, Math.round(barW * ratio), barH);
+  // Shine
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(x, y + 2, Math.round(barW * ratio), 4);
+  // Segment ticks
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  for (let i = 1; i < 10; i++) {
+    const tx = x + (barW / 10) * i;
+    ctx.beginPath();
+    ctx.moveTo(tx, y);
+    ctx.lineTo(tx, y + barH);
+    ctx.stroke();
+  }
+  // Frame around bar
+  ctx.strokeStyle = '#ff2aa0';
+  ctx.strokeRect(x, y, barW, barH);
+  // HP text
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 12px Consolas, "Courier New", monospace';
+  const hpText = `${Math.max(0, boss.hp)} / ${boss.maxHp}`;
+  ctx.fillText(hpText, x + barW - ctx.measureText(hpText).width - 6, y + 15);
+}
+
 function drawPoisonHazards() {
   if (poisonSources.length === 0 && poisonDrops.length === 0) return;
   const now = Date.now() * 0.004;
@@ -2966,6 +4342,10 @@ function drawFlag() {
 }
 
 function drawBackground() {
+  if (currentLevel === 5) {
+    drawCyberCityBackground();
+    return;
+  }
   if (currentLevel === 4) {
     drawSewerBackground();
     return;
@@ -3420,6 +4800,154 @@ function drawSewerBackground() {
   }
 }
 
+function drawCyberCityBackground() {
+  // Deep violet night sky with a horizon neon band.
+  const grad = ctx.createLinearGradient(0, 0, 0, GAME_H);
+  grad.addColorStop(0,    '#140820');
+  grad.addColorStop(0.45, '#24103a');
+  grad.addColorStop(0.65, '#3a1266');
+  grad.addColorStop(0.8,  '#ff2aa0');
+  grad.addColorStop(0.95, '#ff8a1a');
+  grad.addColorStop(1,    '#1a0824');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Distant stars / parallax dots
+  ctx.fillStyle = 'rgba(255, 230, 255, 0.45)';
+  for (let i = 0; i < 80; i++) {
+    const sx = (i * 127 + camX * 0.03) % GAME_W;
+    const sy = (i * 53) % 220;
+    if ((i * 7) % 5 === 0) {
+      ctx.fillStyle = 'rgba(255, 240, 255, 0.65)';
+    } else {
+      ctx.fillStyle = 'rgba(180, 220, 255, 0.35)';
+    }
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+
+  // Far skyline - dark silhouettes of mega-skyscrapers, slow parallax
+  const farColors = ['#0e0820', '#160e2a', '#1a0c30', '#0a0618'];
+  for (let i = 0; i < 22; i++) {
+    const bx = (i * 140 - camX * 0.12) % (GAME_W + 200) - 100;
+    const bh = 130 + (i * 41) % 160;
+    ctx.fillStyle = farColors[i % farColors.length];
+    ctx.fillRect(bx, GAME_H - bh - 40, 100, bh);
+    // Tiny windows - magenta + cyan dots. The lit/unlit decision is keyed to the
+    // BUILDING INDEX and the window's local offset so windows stay in the same
+    // spots as the camera moves (otherwise the moving `bx` shifted the hash and
+    // windows appeared to blink on and off while scrolling).
+    for (let wyOff = 0; (GAME_H - bh - 30) + wyOff < GAME_H - 60; wyOff += 12) {
+      const wy = (GAME_H - bh - 30) + wyOff;
+      for (let wxOff = 6; wxOff < 94; wxOff += 10) {
+        const wx = bx + wxOff;
+        const code = (wyOff * 3 + wxOff + i * 7) % 9;
+        if (code === 0) ctx.fillStyle = 'rgba(255, 80, 200, 0.55)';
+        else if (code === 1) ctx.fillStyle = 'rgba(0, 240, 255, 0.5)';
+        else continue;
+        ctx.fillRect(wx, wy, 2, 3);
+      }
+    }
+    // Tall antenna with blinking light on some
+    if (i % 3 === 0) {
+      ctx.fillStyle = '#2a1a4a';
+      ctx.fillRect(bx + 48, GAME_H - bh - 60, 2, 20);
+      const blink = (Math.floor(Date.now() / 500) + i) % 2;
+      ctx.fillStyle = blink ? '#ff3377' : '#660033';
+      ctx.fillRect(bx + 47, GAME_H - bh - 62, 4, 3);
+    }
+  }
+
+  // Mid-ground buildings - more colorful, medium parallax
+  const midPalette = [
+    { body: '#1a1038', trim: '#ff2aa0' },
+    { body: '#120826', trim: '#00f0ff' },
+    { body: '#20103a', trim: '#ffcc00' },
+    { body: '#160a2a', trim: '#7a33ff' },
+  ];
+  for (let i = 0; i < 18; i++) {
+    const bx = (i * 180 - camX * 0.4) % (GAME_W + 220) - 110;
+    const bh = 100 + (i * 53) % 140;
+    const pal = midPalette[i % midPalette.length];
+    ctx.fillStyle = pal.body;
+    ctx.fillRect(bx, GAME_H - bh - 40, 120, bh);
+    // Neon trim strips
+    ctx.fillStyle = pal.trim;
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(bx, GAME_H - bh - 40, 120, 2);
+    ctx.fillRect(bx, GAME_H - 44, 120, 2);
+    ctx.globalAlpha = 1;
+    // Lit windows grid. Hash keyed to building index + local offsets so the window
+    // pattern is fixed per building and does not change when the camera scrolls.
+    for (let wyOff = 0; (GAME_H - bh - 30) + wyOff < GAME_H - 60; wyOff += 14) {
+      const wy = (GAME_H - bh - 30) + wyOff;
+      for (let wxOff = 8; wxOff < 112; wxOff += 16) {
+        const wx = bx + wxOff;
+        const code = (wyOff * 7 + wxOff + i * 13) % 11;
+        if (code === 0) ctx.fillStyle = 'rgba(255, 100, 220, 0.85)';
+        else if (code === 1) ctx.fillStyle = 'rgba(0, 240, 255, 0.85)';
+        else if (code === 2) ctx.fillStyle = 'rgba(255, 204, 0, 0.75)';
+        else if (code === 3) ctx.fillStyle = 'rgba(180, 120, 255, 0.7)';
+        else continue;
+        ctx.fillRect(wx, wy, 4, 6);
+      }
+    }
+    // Vertical neon sign on some buildings
+    if (i % 4 === 1) {
+      ctx.fillStyle = pal.trim;
+      ctx.globalAlpha = 0.8;
+      ctx.fillRect(bx + 54, GAME_H - bh - 34, 4, bh - 10);
+      ctx.globalAlpha = 1;
+    }
+    // Rooftop neon holo-advert panels
+    if (i % 5 === 0) {
+      const adColor = ['#ff2aa0', '#00f0ff', '#ffcc00'][i % 3];
+      ctx.fillStyle = adColor;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(bx + 18, GAME_H - bh - 56, 84, 12);
+      ctx.fillStyle = '#0a0618';
+      ctx.fillRect(bx + 22, GAME_H - bh - 52, 76, 4);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Foreground holographic grid floor (close parallax)
+  ctx.strokeStyle = 'rgba(0, 240, 255, 0.22)';
+  ctx.lineWidth = 1;
+  for (let gy = GAME_H - 32; gy < GAME_H - 2; gy += 6) {
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    ctx.lineTo(GAME_W, gy);
+    ctx.stroke();
+  }
+  const gridSpacing = 36;
+  const gridOffset = -(camX * 1.0) % gridSpacing;
+  for (let gx = gridOffset; gx < GAME_W + gridSpacing; gx += gridSpacing) {
+    ctx.beginPath();
+    ctx.moveTo(gx, GAME_H - 32);
+    ctx.lineTo(gx + (gx - GAME_W / 2) * 0.15, GAME_H - 2);
+    ctx.stroke();
+  }
+
+  // Light rain streaks
+  ctx.strokeStyle = 'rgba(180, 220, 255, 0.15)';
+  const rainOffset = (Date.now() * 0.4) % 20;
+  for (let i = 0; i < 60; i++) {
+    const rx = (i * 61 - camX * 0.6) % (GAME_W + 40) - 20;
+    const ry = ((i * 37) + rainOffset) % GAME_H;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx - 3, ry + 12);
+    ctx.stroke();
+  }
+
+  // Foreground ground glow strip
+  const groundGrad = ctx.createLinearGradient(0, GAME_H - 48, 0, GAME_H);
+  groundGrad.addColorStop(0, 'rgba(255, 42, 160, 0)');
+  groundGrad.addColorStop(1, 'rgba(255, 42, 160, 0.25)');
+  ctx.fillStyle = groundGrad;
+  ctx.fillRect(0, GAME_H - 48, GAME_W, 48);
+}
+
 // ---- UI Colors & Styles ----
 const UI = {
   bg: '#0a0812',
@@ -3485,6 +5013,218 @@ function drawRoundedRect(x, y, w, h, r, fillColor, strokeColor) {
   }
 }
 
+// ---- Distortion Pedal ----
+// Triggers the AoE attack: deals PEDAL_DAMAGE to every enemy within PEDAL_RADIUS
+// of the player's center, spawns a visual shockwave, kicks off the stomp
+// animation, and starts the cooldown.
+function triggerDistortionPedal() {
+  player.pedalCharges--;
+  player.pedalActive = true;
+  player.pedalTimer = PEDAL_ANIM_DURATION;
+  player.pedalCooldown = PEDAL_COOLDOWN;
+
+  const cx = player.x + player.w / 2;
+  const cy = player.y + player.h;
+
+  // AoE damage to every living (non-invulnerable) enemy in range. Bosses take
+  // the same damage as other enemies - the pedal is a finishing-move style tool.
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (e.invulnerable) continue;     // dashers shrug it off
+    if (e.type === 'dasher' && !e.active) continue;
+    const ex = e.x + 16;              // approx enemy center
+    const ey = e.y + 16;
+    const dx = ex - cx, dy = ey - cy;
+    if (dx * dx + dy * dy <= PEDAL_RADIUS * PEDAL_RADIUS) {
+      e.hp -= PEDAL_DAMAGE;
+      e.hitCooldown = 18;
+      e.hitFlash = 14;
+      if (e.hp <= 0) {
+        e.alive = false;
+        enemiesKilled++;
+        const isBoss    = e.type === 'boss';
+        const isBigbot  = e.type === 'bigbot';
+        const isBrute   = e.type === 'brute';
+        const isSoldier = e.type === 'soldier';
+        const isDrone   = e.type === 'drone';
+        if (isBoss)         score += 1000;
+        else if (isBigbot)  score += 200;
+        else if (isBrute)   score += 120;
+        else if (isSoldier) score += 90;
+        else if (isDrone)   score += 60;
+        else                score += 50;
+        guitarKillSound();
+        if (isBoss) {
+          bossOutroTimer = 120;
+          bossProjectiles.length = 0;
+        }
+      }
+    }
+  }
+
+  // Cosmetic shockwave(s) - one quick burst + one wider ring for the stomp rebound.
+  pedalEffects.push({ x: cx, y: cy, age: 0, life: 30, maxR: PEDAL_RADIUS });
+  pedalEffects.push({ x: cx, y: cy, age: 0, life: 46, maxR: PEDAL_RADIUS * 1.15 });
+
+  // Distorted buzz + low thump.
+  try {
+    const now = audioCtx.currentTime;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.35 * currentVolume() / MASTER_VOLUME_MAX, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    gain.connect(audioCtx.destination);
+    const osc1 = audioCtx.createOscillator();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(160, now);
+    osc1.frequency.exponentialRampToValueAtTime(55, now + 0.35);
+    const osc2 = audioCtx.createOscillator();
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(230, now);
+    osc2.frequency.exponentialRampToValueAtTime(80, now + 0.35);
+    osc1.connect(gain); osc2.connect(gain);
+    osc1.start(now); osc2.start(now);
+    osc1.stop(now + 0.42); osc2.stop(now + 0.42);
+  } catch (_) { /* audio may be suspended */ }
+}
+
+// Draw the pedal sitting under the player while the stomp animation plays.
+// Anim timeline: tt (0..1). Foot slams down at tt=0.25 and tt=0.7 - two quick
+// stomps - with the pedal LED flashing on each impact and the shockwave already
+// drawn by drawPedalShockwaves().
+function drawPedalUnderPlayer() {
+  if (!player.pedalActive) return;
+  const tt = 1 - player.pedalTimer / PEDAL_ANIM_DURATION;
+  const cx = player.x + player.w / 2 - camX;
+  const topY = player.y + player.h - 8;
+
+  // Pedal body - small angled chassis with a red LED and a big white footswitch.
+  ctx.save();
+  ctx.translate(cx, topY);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(0, 8, 28, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Chassis
+  const chassisW = 44, chassisH = 22;
+  ctx.fillStyle = '#1a1a22';
+  ctx.fillRect(-chassisW / 2, -chassisH, chassisW, chassisH);
+  ctx.fillStyle = '#3a0f28';
+  ctx.fillRect(-chassisW / 2, -chassisH, chassisW, 4);
+  // Label strip
+  ctx.fillStyle = '#ff2aa0';
+  ctx.fillRect(-chassisW / 2 + 4, -chassisH + 7, chassisW - 8, 3);
+  // LED (flashes brighter on stomp)
+  const stomp = (tt > 0.2 && tt < 0.35) || (tt > 0.65 && tt < 0.8);
+  ctx.fillStyle = stomp ? '#ffff66' : '#9a2d2d';
+  ctx.fillRect(chassisW / 2 - 9, -chassisH + 14, 4, 4);
+
+  // Footswitch (pressed-down pose during stomp windows)
+  const pressed = stomp;
+  const footSize = pressed ? 10 : 14;
+  const footY = pressed ? -chassisH + 3 : -chassisH - 4;
+  ctx.fillStyle = '#e0e0e0';
+  ctx.beginPath();
+  ctx.arc(0, footY, footSize / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#9a9a9a';
+  ctx.beginPath();
+  ctx.arc(0, footY, footSize / 2 - 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Stomping boot overlay - appears from above and slams down on the switch.
+  const bootProgress = tt < 0.5
+    ? Math.max(0, Math.min(1, (tt - 0.1) / 0.25)) // first stomp
+    : Math.max(0, Math.min(1, (tt - 0.55) / 0.25)); // second stomp
+  const bootY = -chassisH - 42 + bootProgress * 38;
+  ctx.fillStyle = '#2a1410';
+  ctx.fillRect(-14, bootY, 28, 18);
+  ctx.fillStyle = '#482018';
+  ctx.fillRect(-14, bootY + 14, 28, 6);
+  // Laces
+  ctx.strokeStyle = '#eaeaea';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-8, bootY + 4 + i * 4);
+    ctx.lineTo(8, bootY + 4 + i * 4);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Expanding magenta/yellow rings radiating from the stomp point. Drawn in world
+// coords with the camera offset applied.
+function drawPedalShockwaves() {
+  for (const fx of pedalEffects) {
+    const t = fx.age / fx.life;
+    const r = fx.maxR * (0.15 + 0.85 * t);
+    const alpha = 1 - t;
+    ctx.strokeStyle = `rgba(255, 42, 160, ${alpha * 0.9})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(fx.x - camX, fx.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255, 238, 102, ${alpha * 0.55})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(fx.x - camX, fx.y, r * 0.8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1;
+}
+
+// Reward pickup (heart / pedal icon) floating above its high ledge. Gently
+// bobs and pulses to draw attention.
+function drawRewardPickups() {
+  for (const r of rewardPickups) {
+    if (r.collected) continue;
+    const sx = r.x - camX;
+    const bob = Math.sin(r.bobTimer) * 3;
+    const sy = r.y + bob;
+    // Glow halo
+    const pulse = 0.6 + 0.4 * Math.sin(r.bobTimer * 1.5);
+    const grad = ctx.createRadialGradient(sx, sy, 2, sx, sy, 26);
+    grad.addColorStop(0, r.type === 'heart' ? 'rgba(255, 90, 120, 0.85)' : 'rgba(255, 160, 255, 0.85)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = pulse;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    if (r.type === 'heart') {
+      // Pixel heart
+      ctx.fillStyle = '#ff3355';
+      ctx.fillRect(sx - 7, sy - 6, 4, 4);
+      ctx.fillRect(sx + 3, sy - 6, 4, 4);
+      ctx.fillRect(sx - 9, sy - 2, 18, 4);
+      ctx.fillRect(sx - 6, sy + 2, 12, 4);
+      ctx.fillRect(sx - 3, sy + 6, 6, 3);
+      // Highlight
+      ctx.fillStyle = '#ff9da8';
+      ctx.fillRect(sx - 6, sy - 5, 2, 2);
+      ctx.fillRect(sx + 4, sy - 5, 2, 2);
+    } else {
+      // Pedal icon - mini chassis with magenta label and footswitch
+      ctx.fillStyle = '#1a1a22';
+      ctx.fillRect(sx - 11, sy - 7, 22, 14);
+      ctx.fillStyle = '#ff2aa0';
+      ctx.fillRect(sx - 9, sy - 4, 18, 3);
+      ctx.fillStyle = '#ffee66';
+      ctx.fillRect(sx + 6, sy + 1, 2, 2);
+      ctx.fillStyle = '#e0e0e0';
+      ctx.beginPath();
+      ctx.arc(sx - 3, sy + 2, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
 function drawHUD() {
   ctx.fillStyle = 'rgba(6, 6, 10, 0.84)';
   ctx.fillRect(0, 0, UI_W, 56);
@@ -3541,18 +5281,58 @@ function drawHUD() {
   ctx.fillStyle = UI.textDim;
   ctx.font = 'bold 11px Consolas, "Courier New", monospace';
   ctx.fillText('LIVES', 626, 14);
-  for (let i = 0; i < 3; i++) {
-    const hx = 660 + i * 32;
+  // Draw up to MAX_LIVES hearts. When the player has collected bonus hearts
+  // beyond the usual 3, the extra slots appear; unfilled slots stay empty.
+  // Hearts shrink slightly when displaying more than 3 so they still fit.
+  const heartsToShow = Math.max(3, Math.min(MAX_LIVES, lives));
+  const compactHearts = heartsToShow > 3;
+  const heartSize = compactHearts ? 0.7 : 1;
+  const heartGap  = compactHearts ? 22 : 32;
+  const heartX0   = compactHearts ? 640 : 660;
+  for (let i = 0; i < heartsToShow; i++) {
+    const hx = heartX0 + i * heartGap;
     const active = i < lives;
+    const s = heartSize;
     ctx.fillStyle = active ? UI.danger : '#392028';
-    ctx.fillRect(hx, 27, 8, 8);
-    ctx.fillRect(hx + 10, 27, 8, 8);
-    ctx.fillRect(hx + 3, 35, 10, 8);
-    ctx.fillRect(hx + 6, 43, 4, 2);
+    ctx.fillRect(hx,           27, 8 * s, 8 * s);
+    ctx.fillRect(hx + 10 * s,  27, 8 * s, 8 * s);
+    ctx.fillRect(hx + 3 * s,   27 + 8 * s, 10 * s, 8 * s);
+    ctx.fillRect(hx + 6 * s,   27 + 16 * s, 4 * s, 2 * s);
     if (active) {
       ctx.fillStyle = '#ff9da0';
-      ctx.fillRect(hx + 2, 29, 2, 2);
-      ctx.fillRect(hx + 12, 29, 2, 2);
+      ctx.fillRect(hx + 2 * s,  29, 2 * s, 2 * s);
+      ctx.fillRect(hx + 12 * s, 29, 2 * s, 2 * s);
+    }
+  }
+
+  // --- Pedal charges indicator ---
+  // Rendered just below the main HUD panel in its own slim strip when the
+  // player is actually carrying pedals (or one just went off cooldown).
+  if (player.pedalCharges > 0 || player.pedalCooldown > 0 || player.pedalActive) {
+    const stripY = 56;
+    const stripH = 20;
+    ctx.fillStyle = 'rgba(14, 6, 22, 0.85)';
+    ctx.fillRect(UI_W - 220, stripY, 220, stripH);
+    ctx.strokeStyle = 'rgba(255, 42, 160, 0.55)';
+    ctx.strokeRect(UI_W - 220, stripY, 220, stripH);
+    ctx.fillStyle = '#ff2aa0';
+    ctx.font = 'bold 10px Consolas, "Courier New", monospace';
+    ctx.fillText('DISTORTION PEDAL  [F]', UI_W - 214, stripY + 6);
+    // Mini pedal icons for each available charge; the top-of-stack one fades
+    // while the cooldown is running so the player gets visual feedback.
+    for (let i = 0; i < MAX_PEDAL_CHARGES; i++) {
+      const px = UI_W - 94 + i * 14;
+      const py = stripY + 6;
+      const filled = i < player.pedalCharges;
+      const cooldownFade = filled && (i === player.pedalCharges - 1) && player.pedalCooldown > 0;
+      ctx.globalAlpha = filled ? (cooldownFade ? 0.35 : 1) : 0.28;
+      ctx.fillStyle = filled ? '#ff2aa0' : '#3a1020';
+      ctx.fillRect(px, py, 10, 7);
+      if (filled) {
+        ctx.fillStyle = '#ffee66';
+        ctx.fillRect(px + 7, py + 2, 2, 2);
+      }
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -3565,7 +5345,7 @@ let shopRow = 0; // Row (0-2)
 let shopFocus = 'grid'; // 'grid' | 'footer' - which region the dpad controls
 let shopFooterSel = 1;  // 0 = replay button, 1 = next-level button
 const SHOP_COLS = 3;
-const SHOP_ROWS = 3;
+let SHOP_ROWS = 3; // grows when reward guitars are unlocked (see unlockDiyPunkGuitar)
 let shopConfirming = false;
 let shopConfirmSelection = 0; // 0 - да, 1 - нет
 let shopConfirmReleaseRequired = false;
@@ -3634,6 +5414,7 @@ function purchaseSelectedGuitar() {
     player.guitarType = idx;
   } else if (shopConfirmMode === 'buy' && !ownedGuitars.includes(idx) && totalBeer >= g.price) {
     totalBeer -= g.price;
+    moneySpent += g.price;
     ownedGuitars.push(idx);
     player.hasGuitar = true;
     player.guitarType = idx;
@@ -3641,13 +5422,22 @@ function purchaseSelectedGuitar() {
   }
 }
 
-function drawShopItem(i, x, y) {
+function drawShopItem(i, x, y, cardH) {
   const g = guitarTypes[i];
   const owned = ownedGuitars.includes(i);
   const equipped = owned && player.hasGuitar && player.guitarType === i;
   const selected = shopSelection() === i;
   const canAfford = totalBeer >= g.price;
-  const cardW = 220, cardH = 42;
+  const cardW = 220;
+  if (cardH === undefined) cardH = 42;
+  // In compact mode the card is shorter, so pull all row-internal y offsets up
+  // slightly and shrink the color stripe so nothing clips.
+  const compact = cardH < 40;
+  const nameY   = compact ? y + 13 : y + 15;
+  const statusY = compact ? y + 26 : y + 29;
+  const dmgY    = compact ? y + 20 : y + 22;
+  const stripeH = Math.min(24, cardH - 12);
+  const stripeY = y + Math.max(6, Math.floor((cardH - stripeH) / 2));
   const cardFill = equipped ? 'rgba(255, 79, 216, 0.18)' : (selected ? 'rgba(57, 255, 20, 0.18)' : 'rgba(10, 8, 18, 0.88)');
   const borderColor = equipped ? UI.secondary : (selected ? UI.primary : 'rgba(255, 255, 255, 0.08)');
 
@@ -3665,27 +5455,29 @@ function drawShopItem(i, x, y) {
 
   // Guitar color indicator
   ctx.fillStyle = owned ? '#333' : g.color;
-  ctx.fillRect(x + 12, y + 9, 7, 24);
+  ctx.fillRect(x + 12, stripeY, 7, stripeH);
 
   // Name
   ctx.fillStyle = equipped ? UI.secondary : (owned ? UI.textDim : (selected ? UI.primary : UI.text));
   ctx.font = 'bold 12px Consolas, "Courier New", monospace';
-  ctx.fillText(g.name.toUpperCase(), x + 28, y + 15);
+  ctx.fillText(g.name.toUpperCase(), x + 28, nameY);
 
-  // Price / owned / equipped
+  // Price / owned / equipped. Free reward guitars (price 0) show FREE instead
+  // of "0 BEER" so the unlock reads as a trophy rather than pocket change.
   let statusText, statusColor;
   if (equipped) { statusText = 'EQUIPPED'; statusColor = UI.secondary; }
   else if (owned) { statusText = 'OWNED'; statusColor = UI.success; }
+  else if (g.price === 0) { statusText = 'FREE - EARNED'; statusColor = UI.accent; }
   else { statusText = g.price + ' BEER'; statusColor = canAfford ? UI.accent : UI.danger; }
   ctx.fillStyle = statusColor;
   ctx.font = 'bold 11px Consolas, "Courier New", monospace';
-  ctx.fillText(statusText, x + 28, y + 29);
+  ctx.fillText(statusText, x + 28, statusY);
 
   // Damage stat
   ctx.fillStyle = UI.textDim;
   ctx.font = 'bold 11px Consolas, "Courier New", monospace';
   const dmgText = 'DMG ' + g.damage;
-  ctx.fillText(dmgText, x + cardW - 14 - ctx.measureText(dmgText).width, y + 22);
+  ctx.fillText(dmgText, x + cardW - 14 - ctx.measureText(dmgText).width, dmgY);
 
   // Don't register card interactions while the confirmation dialog is open so the
   // dialog can't be silently retargeted by mouse hover/clicks on other cards.
@@ -3781,24 +5573,31 @@ function drawShop() {
   const previewDmg = 'DMG ' + prevGuitar.damage;
   ctx.fillText(previewDmg, 400 - ctx.measureText(previewDmg).width / 2, 265);
 
-  // Guitar list
+  // Auto-compact when more than 3 rows of guitars exist (e.g. after unlocking
+  // the DIY Punk Guitar reward) so everything still fits above the footer.
+  const cols = 3;
+  const totalRows = Math.ceil(guitarTypes.length / cols);
+  const compact = totalRows > 3;
+  const listTitleY = compact ? 272 : 290;
+  const rowY       = compact ? 282 : 302;
+  const rowGap     = compact ? 37  : 44;
+  const cardH      = compact ? 34  : 42;
+
+  // Guitar list header
   ctx.fillStyle = UI.textDim;
   ctx.font = 'bold 14px Arial';
   const listTitle = 'AVAILABLE GUITARS';
   const listTitleWidth = ctx.measureText(listTitle).width;
-  ctx.fillText(listTitle, 400 - listTitleWidth / 2, 290);
+  ctx.fillText(listTitle, 400 - listTitleWidth / 2, listTitleY);
 
-  const cols = 3;
   const xStart = 50;
   const xGap = 250;
-  const rowY = 302;
-  const rowGap = 44;
   for (let i = 0; i < guitarTypes.length; i++) {
     const column = i % cols;
     const row = Math.floor(i / cols);
     const x = xStart + column * xGap;
     const y = rowY + row * rowGap;
-    drawShopItem(i, x, y);
+    drawShopItem(i, x, y, cardH);
   }
 
   // Confirmation dialog - semi-transparent backdrop to prevent accidental clicks on
@@ -4543,9 +6342,13 @@ function draw() {
     ctx.fillText(beerText, centerX - ctx.measureText(beerText).width / 2, 262);
 
     // Attempts indicator (only relevant on levels 2+, where respawns are allowed).
-    const willRespawn = currentLevel > 1 && levelDeathCount < MAX_DEATHS_PER_LEVEL;
+    const willRespawn = bossActive || (currentLevel > 1 && levelDeathCount < MAX_DEATHS_PER_LEVEL);
     ctx.font = 'bold 14px Consolas, "Courier New", monospace';
-    if (currentLevel > 1) {
+    if (bossActive) {
+      ctx.fillStyle = UI.secondary;
+      const bossLine = 'BOSS FIGHT - UNLIMITED RETRIES';
+      ctx.fillText(bossLine, centerX - ctx.measureText(bossLine).width / 2, 292);
+    } else if (currentLevel > 1) {
       const attemptsUsed = levelDeathCount;
       const attemptsLeft = Math.max(0, MAX_DEATHS_PER_LEVEL - attemptsUsed);
       ctx.fillStyle = willRespawn ? UI.primary : UI.danger;
@@ -4560,10 +6363,89 @@ function draw() {
     drawRoundedRect(centerX - btnW / 2, 310, btnW, 50, 8, UI.primary, UI.primary);
     ctx.fillStyle = UI.bg;
     ctx.font = 'bold 16px Consolas, "Courier New", monospace';
-    const retryText = willRespawn
-      ? `RESPAWN ON LEVEL ${currentLevel}  (SPACE / A)`
-      : 'PRESS SPACE / A TO RETRY';
+    const retryText = bossActive
+      ? 'RETRY BOSS FIGHT  (SPACE / A)'
+      : (willRespawn
+        ? `RESPAWN ON LEVEL ${currentLevel}  (SPACE / A)`
+        : 'PRESS SPACE / A TO RETRY');
     ctx.fillText(retryText, centerX - ctx.measureText(retryText).width / 2, 340);
+    popUITransform();
+    return;
+  }
+
+  if (gameState === 'victory') {
+    // Neon victory screen: celebrates beating the final boss.
+    // Animated cyber-city backdrop for flavor.
+    drawCyberCityBackground();
+    pushUITransform();
+
+    // Dim overlay
+    ctx.fillStyle = 'rgba(10, 5, 22, 0.72)';
+    ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+    const centerX = 400;
+    drawRoundedRect(80, 40, 640, 400, 18, 'rgba(14, 8, 26, 0.95)', '#ff2aa0');
+
+    // Title - multi-layer neon glow
+    ctx.save();
+    ctx.shadowColor = '#ff2aa0';
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = '#ffee66';
+    ctx.font = 'bold 48px Consolas, "Courier New", monospace';
+    const title = 'VICTORY!';
+    ctx.fillText(title, centerX - ctx.measureText(title).width / 2, 108);
+    ctx.restore();
+
+    ctx.fillStyle = '#ff2aa0';
+    ctx.font = 'bold 16px Consolas, "Courier New", monospace';
+    const sub1 = 'THE MEGA-CORP TITAN LIES IN RUINS';
+    ctx.fillText(sub1, centerX - ctx.measureText(sub1).width / 2, 142);
+
+    ctx.fillStyle = '#d9d1f8';
+    ctx.font = '14px Consolas, "Courier New", monospace';
+    const sub2 = 'The neon city breathes again.';
+    ctx.fillText(sub2, centerX - ctx.measureText(sub2).width / 2, 166);
+
+    // Stats panel
+    drawPanel(150, 188, 500, 200, '#ff2aa0', 'rgba(26, 10, 38, 0.9)');
+    ctx.fillStyle = '#ffcc00';
+    ctx.font = 'bold 16px Consolas, "Courier New", monospace';
+    ctx.fillText('RUN STATS', 170, 214);
+
+    // Format run time as MM:SS.
+    const runMs = Math.max(0, (runEndMs || Date.now()) - runStartMs);
+    const totalSec = Math.floor(runMs / 1000);
+    const mm = Math.floor(totalSec / 60).toString().padStart(2, '0');
+    const ss = (totalSec % 60).toString().padStart(2, '0');
+
+    // Two-column stat readout.
+    ctx.font = '14px Consolas, "Courier New", monospace';
+    const rows = [
+      ['Time:',           `${mm}:${ss}`,              '#ffffff'],
+      ['Enemies Killed:', String(enemiesKilled),      '#ffffff'],
+      ['Beer Collected:', String(beerCollected),      '#ffee66'],
+      ['Money Spent:',    `${moneySpent} beer`,       '#ff9ad6'],
+      ['Final Score:',    String(score),              '#ffffff'],
+      ['Beer Banked:',    String(totalBeer),          '#ffee66'],
+    ];
+    const labelX = 180;
+    const valueX = 520;
+    let rowY = 244;
+    for (const [label, value, color] of rows) {
+      ctx.fillStyle = '#d9d1f8';
+      ctx.fillText(label, labelX, rowY);
+      ctx.fillStyle = color;
+      ctx.fillText(value, valueX - ctx.measureText(value).width, rowY);
+      rowY += 24;
+    }
+
+    // Continue hint - blinking
+    const blinkAlpha = 0.45 + 0.45 * Math.abs(Math.sin(Date.now() * 0.004));
+    ctx.fillStyle = `rgba(57, 255, 20, ${blinkAlpha})`;
+    ctx.font = 'bold 14px Consolas, "Courier New", monospace';
+    const hint = 'PRESS  SPACE / ENTER / A  TO RETURN TO MENU';
+    ctx.fillText(hint, centerX - ctx.measureText(hint).width / 2, 416);
+
     popUITransform();
     return;
   }
@@ -4571,18 +6453,158 @@ function draw() {
   // Game
   drawBackground();
   platforms.forEach(drawPlatform);
-  drawFlag();
+  // Hide the goal flag during the boss fight - there is no flag, just the arena.
+  if (!bossActive) drawFlag();
   beerCans.forEach(drawCoin);
+  drawRewardPickups();
   enemies.forEach(drawEnemy);
   drawPoisonHazards();
+  drawBossProjectiles();
+
+  // Stage-light spotlight on the hero during the outro performance. Drawn BEHIND
+  // the player sprite so the sprite reads crisp against a glowing halo.
+  if (performanceActive) drawPerformanceSpotlight();
+
+  // Pedal shockwaves drawn behind the sprite so the hero stays legible on top.
+  drawPedalShockwaves();
 
   const blink = player.invincible && Math.floor(player.invincibleTimer / 6) % 2 === 0;
   if (!blink) drawPixelPunk(player.x - camX, player.y, player.facing, player.animFrame, player.hasGuitar);
 
+  // Pedal chassis + stomping boot overlay drawn OVER the sprite so the hero
+  // visibly appears to press the pedal under themselves.
+  drawPedalUnderPlayer();
+
+  // Fireworks / sparkle particles sprayed over the hero during the solo.
+  if (performanceActive) drawPerformanceSparks();
+
   pushUITransform();
+  if (bossActive) drawBossHPBar();
+  if (performanceActive) drawPerformanceBanner();
   drawHUD();
   if (gameState === 'paused') drawPauseOverlay();
   popUITransform();
+}
+
+// ---- Performance outro visuals ----
+function drawPerformanceSpotlight() {
+  const cx = player.x + player.w / 2 - camX;
+  const cy = player.y + player.h / 2;
+  const t = 1 - performanceTimer / PERFORMANCE_DURATION; // 0 -> 1 across outro
+  const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.012);
+
+  // Soft circular halo behind the hero.
+  const haloR = 140 + pulse * 18;
+  const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, haloR);
+  grad.addColorStop(0, 'rgba(255, 230, 160, 0.55)');
+  grad.addColorStop(0.4, 'rgba(255, 120, 200, 0.35)');
+  grad.addColorStop(1, 'rgba(255, 80, 180, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Twin stage-light cones coming from the ceiling corners - sweep slightly.
+  const sweep = Math.sin(Date.now() * 0.002) * 40;
+  drawStageLightCone(80,  0, cx + sweep, cy, 'rgba(255, 80, 210, 0.18)');
+  drawStageLightCone(720, 0, cx - sweep, cy, 'rgba(90, 220, 255, 0.18)');
+
+  // Ground glow disk.
+  ctx.fillStyle = `rgba(255, 160, 60, ${0.28 + pulse * 0.18})`;
+  ctx.beginPath();
+  ctx.ellipse(cx, player.y + player.h, 80, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawStageLightCone(sx, sy, tx, ty, color) {
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return;
+  const nx = -dy / len;
+  const ny =  dx / len;
+  const spread = 50;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(tx + nx * spread, ty + ny * spread);
+  ctx.lineTo(tx - nx * spread, ty - ny * spread);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Persistent spark buffer so we can fade them out gradually.
+const performanceSparks = [];
+function drawPerformanceSparks() {
+  // Spawn new sparks every few frames when the hero is shredding.
+  if (player.attacking && Math.random() < 0.55) {
+    const cx = player.x + player.w / 2 - camX + (Math.random() - 0.5) * 30;
+    const cy = player.y + 14 + Math.random() * 22;
+    performanceSparks.push({
+      x: cx,
+      y: cy,
+      vx: (Math.random() - 0.5) * 3.5,
+      vy: -2 - Math.random() * 3,
+      life: 40,
+      maxLife: 40,
+      hue: Math.random() < 0.5 ? '#ffee66' : (Math.random() < 0.5 ? '#ff4fd8' : '#39ff14'),
+    });
+  }
+  // Occasionally launch firework bursts from random stage positions.
+  if (Math.random() < 0.04) {
+    const fx = 80 + Math.random() * (GAME_W - 160);
+    const fy = 60 + Math.random() * 160;
+    for (let k = 0; k < 14; k++) {
+      const a = (k / 14) * Math.PI * 2;
+      performanceSparks.push({
+        x: fx,
+        y: fy,
+        vx: Math.cos(a) * (2 + Math.random() * 1.5),
+        vy: Math.sin(a) * (2 + Math.random() * 1.5),
+        life: 36,
+        maxLife: 36,
+        hue: ['#ff4fd8', '#ffee66', '#39ff14', '#6fdfff'][Math.floor(Math.random() * 4)],
+      });
+    }
+  }
+  // Update + draw
+  for (let i = performanceSparks.length - 1; i >= 0; i--) {
+    const s = performanceSparks[i];
+    s.x += s.vx;
+    s.y += s.vy;
+    s.vy += 0.12;
+    s.life--;
+    if (s.life <= 0) { performanceSparks.splice(i, 1); continue; }
+    const alpha = s.life / s.maxLife;
+    ctx.fillStyle = s.hue;
+    ctx.globalAlpha = alpha;
+    ctx.fillRect(s.x - 1.5, s.y - 1.5, 3, 3);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPerformanceBanner() {
+  // Pulsing "FINAL SOLO" banner across the top of the screen.
+  const pulse = 0.7 + 0.3 * Math.sin(Date.now() * 0.008);
+  const bannerY = 88;
+  const bannerH = 40;
+  const bannerW = 420;
+  const bannerX = (UI_W - bannerW) / 2;
+  ctx.fillStyle = 'rgba(14, 6, 22, 0.92)';
+  ctx.fillRect(bannerX, bannerY, bannerW, bannerH);
+  ctx.strokeStyle = '#ff2aa0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bannerX, bannerY, bannerW, bannerH);
+  ctx.lineWidth = 1;
+
+  ctx.save();
+  ctx.shadowColor = '#ff2aa0';
+  ctx.shadowBlur = 14 * pulse;
+  ctx.fillStyle = '#ffee66';
+  ctx.font = 'bold 22px Consolas, "Courier New", monospace';
+  const label = '* FINAL SOLO *';
+  ctx.fillText(label, (UI_W - ctx.measureText(label).width) / 2, bannerY + 28);
+  ctx.restore();
 }
 
 function drawPauseOverlay() {
@@ -4670,6 +6692,28 @@ function loop(time) {
 function startGame() {
   score = 0;
   lives = 3;
+  // Clear boss-fight state - a fresh run always starts on a normal level.
+  bossActive = false;
+  bossOutroTimer = 0;
+  bossProjectiles.length = 0;
+  boss = null;
+  performanceActive = false;
+  performanceTimer = 0;
+  player.performing = false;
+  // Start a brand-new playthrough timer / counters when launching from level 1.
+  if (currentLevel === 1) {
+    runStartMs = Date.now();
+    runEndMs = 0;
+    enemiesKilled = 0;
+    beerCollected = 0;
+    moneySpent = 0;
+    // Reward-gated consumables (pedals / bonus hearts) only persist within a
+    // single playthrough - a fresh run starts with the defaults.
+    player.pedalCharges = 0;
+    player.pedalActive = false;
+    player.pedalTimer = 0;
+    player.pedalCooldown = 0;
+  }
   resetPlayer();
   buildLevel();
   camX = 0;
@@ -4699,6 +6743,10 @@ function startGame() {
   gameState = 'playing';
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
+
+// If a previous playthrough has beaten the final boss, unlock the DIY Punk
+// Guitar in the shop for this (repeat) run.
+if (bossBeatenEver) unlockDiyPunkGuitar();
 
 buildLevel();
 requestAnimationFrame(loop);
